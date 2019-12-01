@@ -94,14 +94,3 @@ let find_chat state q =
       matches_user || matches_title)
 ;;
 
-let name_of_sender message state =
-  let chat_id = Message.chat_id message in
-  let sender_user_id = Message.sender_user_id message in
-  if sender_user_id > 0l
-  then (
-    let user = Users.find state.users sender_user_id in
-    Option.map user ~f:User.full_name)
-  else (
-    let chat = Chats.find state.chats chat_id in
-    Option.map chat ~f:Chat.title)
-;;

@@ -4,6 +4,21 @@ open Tdlib
 
 let api_id = Sys.getenv_exn "TG_API_ID"
 let api_hash = Sys.getenv_exn "TG_API_HASH"
+let db_key = Sys.getenv_exn "TG_DB_KEY"
+
+let request_chats state client chat_ids =
+  let open Models in
+  if not (List.is_empty chat_ids)
+  then
+    chat_ids
+    |> List.last_exn
+    |> State.chat state
+    |> Option.iter ~f:(fun chat ->
+           let offset_chat_id = Chat.id chat in
+           let offset_order = Chat.order chat in
+           let request = Chat.Request.Get_chats.create ~offset_chat_id ~offset_order () in
+           Client.send client (Get_chats request))
+;;
 
 let dispatch ~db_path ~debug_mode state client response =
   let open Models.Request in
@@ -35,7 +50,7 @@ let dispatch ~db_path ~debug_mode state client response =
     Client.send client (Set_tdlib_parameters parameters);
     state
   | Update_authorization_state Wait_encryption_key ->
-    Client.send client (Check_database_encryption_key (Sys.getenv_exn "TG_DB_KEY"));
+    Client.send client (Check_database_encryption_key db_key);
     state
   | Update_authorization_state Wait_phone_number ->
     let phone_number = Readline.readline "Phone number: " in
@@ -52,18 +67,9 @@ let dispatch ~db_path ~debug_mode state client response =
     state
   | Chats chat_ids ->
     List.iter chat_ids ~f:(fun id -> Client.send client (Get_chat id));
-    (match chat_ids with
-    | [] -> ()
-    | chats ->
-      let chat = chats |> List.last_exn |> State.chat state in
-      Option.iter chat ~f:(fun chat ->
-          let offset_chat_id = Models.Chat.id chat in
-          let offset_order = Models.Chat.order chat in
-          let request =
-            Models.Chat.Request.Get_chats.create ~offset_chat_id ~offset_order ()
-          in
-          Client.send client (Get_chats request)));
-    State.set_chat_ids state chat_ids
+    request_chats state client chat_ids;
+    let current_chat_ids = state.chat_ids in
+    State.set_chat_ids state (current_chat_ids @ chat_ids)
   | Update_new_message message ->
     let key = Some (Int32.hash (Models.Message.sender_user_id message)) in
     let description =
@@ -75,9 +81,9 @@ let dispatch ~db_path ~debug_mode state client response =
   | Chat chat | Update_new_chat chat -> State.set_chat state chat
   | Update_user user -> State.set_user state user
   | Update_user_status update ->
-    let open Models.User.Request.Update_status in
-    let user_id = user_id update in
-    let status = status update in
+    let open Models.User.Request in
+    let user_id = Update_status.user_id update in
+    let status = Update_status.status update in
     let user = State.user state user_id in
     let status = Display.User.Status.to_description_string status in
     Option.iter (Option.both user status) ~f:(fun (user, status) ->
@@ -86,10 +92,10 @@ let dispatch ~db_path ~debug_mode state client response =
           (sprintf "%s: %s\n" (Models.User.full_name user) status));
     state
   | Update_user_chat_action update ->
-    let open Models.User.Request.Update_chat_action in
-    let action = action update in
-    let chat_id = chat_id update in
-    let user_id = user_id update in
+    let open Models.User.Request in
+    let action = Update_chat_action.action update in
+    let chat_id = Update_chat_action.chat_id update in
+    let user_id = Update_chat_action.user_id update in
     let chat = State.chat state chat_id in
     let user = State.user state user_id in
     let prefix = Display.Update.prefix chat user in
@@ -97,11 +103,8 @@ let dispatch ~db_path ~debug_mode state client response =
     Cli.print ~style:[ `Dim; `Yellow ] (sprintf "%s: %s\n" prefix action);
     state
   | Update_file file ->
-    Cli.print
-      ~style:[ `Green ]
-      (sprintf
-         "File: %s\n"
-         (Display.File.Local.to_description_string (Models.File.local file)));
+    let description = Display.File.Local.to_description_string (Models.File.local file) in
+    Cli.print ~style:[ `Green ] (sprintf "File: %s\n" description);
     state
   | _ -> state
 ;;
