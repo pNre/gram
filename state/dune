@@ -1,0 +1,5 @@
+(library
+ (name state)
+ (libraries str core async tdlib)
+ (preprocess
+  (pps ppx_let)))

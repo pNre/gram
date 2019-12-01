@@ -1,0 +1,5 @@
+(library
+ (name cli)
+ (libraries core async angstrom textutils.console tdlib state readline)
+ (preprocess
+  (pps ppx_let)))

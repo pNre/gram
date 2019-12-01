@@ -1,0 +1,5 @@
+(executable
+ (name main)
+ (libraries tdlib cmds state core async readline cli display) 
+ (preprocess
+  (pps ppx_let)))
