@@ -25,5 +25,10 @@ dune build @all
 
 #### Running
 
-`./_build/default/main.exe`
+1. Get `api_id` and `api_hash` from https://my.telegram.org/auth
+2. Export the following environment variables:
+   - `TG_API_ID`
+   - `TG_API_HASH`
+   - `TG_DB_KEY`: encryption key for TDLib to encrypt local data 
+3. Run `./_build/default/main.exe`
 
