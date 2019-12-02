@@ -3,11 +3,11 @@ open Tdlib.Models
 
 module Update = struct
   let prefix chat user =
-    let chat_user_id = Option.bind ~f:Chat.user_id chat in
-    if chat_user_id = Option.map ~f:User.id user
+    let chat_user_id = Option.bind chat ~f:Chat.user_id in
+    if chat_user_id = Option.map user ~f:User.id
     then Chat.title (Option.value_exn chat)
     else (
-      let user_name = Option.map ~f:User.full_name user in
+      let user_name = Option.map user ~f:User.full_name in
       let chat_title = Option.map chat ~f:Chat.title in
       [ user_name; chat_title ] |> List.filter_opt |> String.concat ~sep:" @ ")
   ;;
@@ -20,23 +20,27 @@ module Message = struct
     Update.prefix (chat_by_id chat_id) (user_by_id sender_user_id)
   ;;
 
+  let display_content_of_photo
+      Message.Content.Photo.{ caption = { text = caption; _ }; photo = { sizes; _ }; _ }
+    =
+    let file = sizes |> List.last_exn |> Photo.Size.photo in
+    let local_file_path = file |> File.local |> File.Local.path in
+    let info =
+      [ caption; local_file_path ]
+      |> List.filter ~f:(Fun.negate String.is_empty)
+      |> String.concat ~sep:" -> "
+    in
+    if String.is_empty info
+    then sprintf "[Photo %ld]" (File.id file)
+    else sprintf "[Photo %ld] <%s>" (File.id file) info
+  ;;
+
   let display_content message =
     match Message.content message with
     | Message_text text -> Some (Formatted_text.text (Message.Content.Text.text text))
-    | Message_photo { caption = { text = caption; _ }; photo = { sizes; _ }; _ } ->
-      let or_none s = if String.length s = 0 then None else Some s in
-      let caption = or_none caption in
-      let file =
-        sizes
-        |> List.last
-        |> Option.map ~f:(fun photo ->
-               let file = Photo.Size.photo photo in
-               let id = File.id file in
-               let local_file_path = file |> File.local |> File.Local.path in
-               Option.value ~default:(Int32.to_string id) (or_none local_file_path))
-      in
-      let info = String.concat ~sep:" @ " (List.filter_opt [ caption; file ]) in
-      Some (sprintf "[Photo] <%s>" info)
+    | Message_photo photo when not (List.is_empty photo.photo.sizes) ->
+      Some (display_content_of_photo photo)
+    | Message_photo _ -> None
     | Message_animation _ -> Some "[Animation]"
     | Other _ -> None
   ;;
