@@ -48,7 +48,8 @@ let configure state' =
   Readline.Completion_entry_function.set Completion.completion_entry;
   Readline.Char_is_quoted.set Completion.is_char_quoted;
   Readline.Completer_quote_characters.set (Some "\"");
-  Readline.Completer_word_break_characters.set (Some " \t")
+  Readline.Completer_word_break_characters.set (Some " \t");
+  Readline.Filename_quote_characters.set (Some " ")
 ;;
 
 let parse client state exec () =

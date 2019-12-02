@@ -114,6 +114,10 @@ module Completer_word_break_characters = Value.RW_string (struct
   let name = "rl_completer_word_break_characters"
 end)
 
+module Filename_quote_characters = Value.RW_string (struct
+  let name = "rl_filename_quote_characters"
+end)
+
 module Completer_quote_characters = Value.RW_string (struct
   let name = "rl_completer_quote_characters"
 end)

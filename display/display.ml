@@ -91,7 +91,7 @@ module File = struct
     open File.Local
 
     let to_description_string file =
-      [ (let path = path file in
+      [ (let path = Str.global_replace (Str.regexp " ") "\\ " (path file) in
          if String.length path > 0 then Some (path ^ " ->") else None)
       ; (if is_downloading_active file
         then Some "Downloading"
