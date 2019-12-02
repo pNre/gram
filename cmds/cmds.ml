@@ -5,24 +5,27 @@ open Tdlib
 
 module Parser = struct
   open Angstrom
+  open Char
 
-  let is_identifier = function
-    | '"' -> false
-    | c -> not (Char.is_whitespace c)
-  ;;
-
-  let spaces = take_while1 Char.is_whitespace
-  let identifier = take_while1 is_identifier
-  let escaped_space = char '\\' *> char ' '
+  let escape = '\\'
+  let quote = '"'
+  let is_identifier c = (not (is_whitespace c)) && not (c = quote)
+  let identifier = take_while1 is_identifier <?> "identifier"
+  let whitespaces = take_while is_whitespace <?> "whitespaces"
+  let escaped_space = char escape *> satisfy is_whitespace
 
   let string_literal =
-    let quoted_chars = char '"' *> many1 (not_char '"') <* char '"' in
-    let escaped_chars = many1 (escaped_space <|> satisfy is_identifier) in
-    let string_literal = quoted_chars <|> escaped_chars in
-    string_literal >>| String.of_char_list
+    let quoted = char quote *> many (not_char quote) <* char quote <?> "quoted string" in
+    let escaped = many1 (escaped_space <|> satisfy is_identifier) <?> "escaped string" in
+    quoted <|> escaped >>| String.of_char_list
   ;;
 
-  let parse = parse_string (sep_by spaces (string_literal <|> identifier))
+  let parse =
+    parse_string
+      (many_till
+         (whitespaces *> string_literal <|> identifier <* whitespaces)
+         end_of_input)
+  ;;
 end
 
 module Command = struct
@@ -195,6 +198,7 @@ let fallback cmd =
     |> List.sort ~compare:(fun a b -> String.compare (Command.name a) (Command.name b))
     |> List.map ~f:Command.description
     |> List.iter ~f:(printf [] "%s")
+  else printf [] "Unknown command: %s\n" (string_with_attr [ `Bright ] cmd)
 ;;
 
 (* Entry point *)
@@ -206,6 +210,6 @@ let exec client state cmd =
   | Ok [] -> return ()
   | Ok (command :: _) -> return (fallback command)
   | Error error ->
-    Cli.print ~style:[ `Red ] error;
+    printf [] "%s\n" error;
     return ()
 ;;
