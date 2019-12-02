@@ -52,21 +52,27 @@ module Chat = struct
   module Action = struct
     open Chat.Action
 
+    let to_string = function
+      | Choosing_contact -> Some "Choosing a contact"
+      | Choosing_location -> Some "Choosing a location"
+      | Recording_video -> Some "Recording a video"
+      | Recording_video_note -> Some "Recording a video note"
+      | Recording_voice_note -> Some "Recording a voice note"
+      | Start_playing_game -> Some "Playing a game"
+      | Typing -> Some "Typing"
+      | Uploading_document -> Some "Uploading a document"
+      | Uploading_photo -> Some "Uploading a photo"
+      | Uploading_video -> Some "Uploading a video"
+      | Uploading_video_note -> Some "Uploading a video note"
+      | Uploading_voice_note -> Some "Uploading a voice note"
+      | Cancel | Other _ -> None
+    ;;
+
     let to_description_string = function
-      | Cancel -> "Cancelled previous action"
-      | Choosing_contact -> "Choosing a contact"
-      | Choosing_location -> "Choosing a location"
-      | Recording_video -> "Recording a video"
-      | Recording_video_note -> "Recording a video note"
-      | Recording_voice_note -> "Recording a voice note"
-      | Start_playing_game -> "Playing a game"
-      | Typing -> "Typing"
-      | Uploading_document -> "Uploading a document"
-      | Uploading_photo -> "Uploading a photo"
-      | Uploading_video -> "Uploading a video"
-      | Uploading_video_note -> "Uploading a video note"
-      | Uploading_voice_note -> "Uploading a voice note"
-      | Other _ -> "Unknown action"
+      | `Set action -> to_string action
+      | `Unset action ->
+        Option.map (to_string action) ~f:(fun action -> "(Stopped) " ^ action)
+      | `No_op -> None
     ;;
   end
 end

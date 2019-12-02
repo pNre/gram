@@ -10,11 +10,19 @@ end
 module Users = Map (Int32.Map) (User)
 module Chats = Map (Int64.Map) (Chat)
 
+module Chat_action_key = struct
+  include Tuple.Make (Int32) (Int64)
+  include Tuple.Comparable (Int32) (Int64)
+end
+
+module Chat_actions = Map (Chat_action_key.Map) (Chat.Action)
+
 type t =
   { is_ready : unit Async.Ivar.t
   ; users : Users.t
   ; chats : Chats.t
   ; chat_ids : int64 list
+  ; chat_actions : Chat_actions.t
   ; unread_messages : Message.t list
   }
 
@@ -23,6 +31,7 @@ let empty =
   ; users = Users.empty
   ; chats = Chats.empty
   ; chat_ids = []
+  ; chat_actions = Chat_actions.empty
   ; unread_messages = []
   }
 ;;
@@ -47,9 +56,7 @@ let set_unread_messages state unread_messages = { state with unread_messages }
 (*Events*)
 let when_ready state = Async.Ivar.read state.is_ready
 
-(*
- * Users
- *)
+(*Users*)
 let user state id = Users.find state.users id
 
 let users_by_name state name =
@@ -67,9 +74,7 @@ let lookup_users state q =
          Str.string_match regexp full_name 0)
 ;;
 
-(*
- * Chats
- *)
+(*Chats*)
 let chat state id = Chats.find state.chats id
 
 let lookup_chats state q =
@@ -94,3 +99,17 @@ let find_chat state q =
       matches_user || matches_title)
 ;;
 
+let update_chat_action state new_action user chat =
+  let key = User.id user, Chat.id chat in
+  let action = Chat_actions.find state.chat_actions key in
+  match action with
+  | Some action when new_action = action -> `No_op, state
+  | Some action when new_action = Cancel ->
+    let chat_actions = Chat_actions.remove state.chat_actions key in
+    let state = { state with chat_actions } in
+    `Unset action, state
+  | Some _ | None ->
+    let chat_actions = Chat_actions.set state.chat_actions ~key ~data:new_action in
+    let state = { state with chat_actions } in
+    `Set new_action, state
+;;

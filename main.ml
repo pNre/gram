@@ -92,6 +92,7 @@ let dispatch ~db_path ~debug_mode state client response =
           (sprintf "%s: %s\n" (Models.User.full_name user) status));
     state
   | Update_user_chat_action update ->
+    let open Core in
     let open Models.User.Request in
     let action = Update_chat_action.action update in
     let chat_id = Update_chat_action.chat_id update in
@@ -99,8 +100,13 @@ let dispatch ~db_path ~debug_mode state client response =
     let chat = State.chat state chat_id in
     let user = State.user state user_id in
     let prefix = Display.Update.prefix chat user in
-    let action = Display.Chat.Action.to_description_string action in
-    Cli.print ~style:[ `Dim; `Yellow ] (sprintf "%s: %s\n" prefix action);
+    let result = Option.map2 user chat ~f:(State.update_chat_action state action) in
+    let state = Option.value_map result ~default:state ~f:snd in
+    result
+    |> Option.map ~f:fst
+    |> Option.bind ~f:Display.Chat.Action.to_description_string
+    |> Option.iter ~f:(fun op ->
+           Cli.print ~style:[ `Dim; `Yellow ] (sprintf "%s: %s\n" prefix op));
     state
   | Update_file file ->
     let description = Display.File.Local.to_description_string (Models.File.local file) in
