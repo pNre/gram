@@ -94,8 +94,12 @@ module File = struct
   module Local = struct
     open File.Local
 
+    let escape =
+      String.Escaping.escape ~escapeworthy:[ ' ' ] ~escape_char:'\\' |> Staged.unstage
+    ;;
+
     let to_description_string file =
-      [ (let path = Str.global_replace (Str.regexp " ") "\\ " (path file) in
+      [ (let path = escape (path file) in
          if String.length path > 0 then Some (path ^ " ->") else None)
       ; (if is_downloading_active file
         then Some "Downloading"

@@ -73,12 +73,11 @@ let users_by_name state name =
 ;;
 
 let lookup_users state q =
-  let regexp = Str.regexp_case_fold ("^" ^ q) in
   Users.to_alist state.users
   |> List.map ~f:snd
   |> List.filter ~f:(fun user ->
          let full_name = User.full_name user in
-         Str.string_match regexp full_name 0)
+         String.Caseless.is_prefix full_name ~prefix:q)
 ;;
 
 (*Users status*)
@@ -101,10 +100,9 @@ let set_chat state chat =
 let chat state id = Chats.find state.chats id
 
 let lookup_chats state q =
-  let regexp = Str.regexp_case_fold ("^" ^ q) in
   Chats.to_alist state.chats
   |> List.map ~f:snd
-  |> List.filter ~f:(fun chat -> Str.string_match regexp (Chat.title chat) 0)
+  |> List.filter ~f:(fun chat -> String.Caseless.is_prefix (Chat.title chat) ~prefix:q)
 ;;
 
 let find_chat state q =
