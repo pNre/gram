@@ -37,10 +37,19 @@ let print_user_status state update =
   let user_id = Update_status.user_id update in
   let status = Update_status.status update in
   let user = State.user state user_id in
-  let status = Display.User.Status.to_description_string status in
-  Option.iter (Option.both user status) ~f:(fun (user, status) ->
-      Cli.print ~style:[ `Dim; `Yellow ] (sprintf "%s: %s\n" (User.full_name user) status));
-  state
+  let description = Display.User.Status.to_description_string status in
+  let result =
+    Option.map user ~f:(fun user -> State.update_user_status state user status)
+  in
+  match result with
+  | Some (`Ok state) ->
+    Option.both user description
+    |> Option.iter ~f:(fun (user, description) ->
+           Cli.print
+             ~style:[ `Dim; `Yellow ]
+             (sprintf "%s: %s\n" (User.full_name user) description));
+    state
+  | _ -> state
 ;;
 
 let print_chat_action state update =

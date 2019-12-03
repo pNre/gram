@@ -70,7 +70,7 @@ module Chat = struct
       | `Set action -> to_string action
       | `Unset action ->
         Option.map (to_string action) ~f:(fun action -> "(Stopped) " ^ action)
-      | `No_op -> None
+      | `Duplicate -> None
     ;;
   end
 end
