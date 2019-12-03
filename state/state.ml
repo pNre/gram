@@ -111,18 +111,17 @@ let lookup_chats state q =
 ;;
 
 let find_chat state q =
-  let chats = Chats.to_alist state.chats |> List.map ~f:snd in
-  let users = users_by_name state q in
-  let user_ids = List.map users ~f:User.id in
-  List.find chats ~f:(fun chat ->
-      let matches_user =
-        match Chat.typ chat with
-        | Private private_chat
-          when List.mem user_ids private_chat.user_id ~equal:Int32.( = ) -> true
-        | _ -> false
-      in
-      let matches_title = String.Caseless.equal (Chat.title chat) q in
-      matches_user || matches_title)
+  let user_ids = q |> users_by_name state |> List.map ~f:User.id |> Int32.Set.of_list in
+  let matches_user chat =
+    match Chat.typ chat with
+    | Private { user_id; _ } | Secret { user_id; _ } -> Int32.Set.mem user_ids user_id
+    | _ -> false
+  in
+  let matches_title chat = String.Caseless.equal (Chat.title chat) q in
+  state.chats
+  |> Chats.to_alist
+  |> List.map ~f:snd
+  |> List.find ~f:(fun chat -> matches_user chat || matches_title chat)
 ;;
 
 let update_chat_action state new_action user chat =
