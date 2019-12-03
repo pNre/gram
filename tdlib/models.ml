@@ -1,3 +1,4 @@
+open Core
 open Yojson.Safe.Util
 
 type user_id = int32
@@ -15,22 +16,14 @@ type message_id = int64
 let message_id_of_yojson = int64_of_yojson
 let yojson_of_message_id = yojson_of_int64
 
-type time = Core.Time.t
+type time = Time.t
 
 let time_of_yojson j =
-  j
-  |> int64_of_yojson
-  |> Int64.to_float
-  |> Core.Time.Span.of_sec
-  |> Core.Time.of_span_since_epoch
+  j |> int64_of_yojson |> Int64.to_float |> Time.Span.of_sec |> Time.of_span_since_epoch
 ;;
 
 let yojson_of_time t =
-  t
-  |> Core.Time.to_span_since_epoch
-  |> Core.Time.Span.to_sec
-  |> Int64.of_float
-  |> yojson_of_int64
+  t |> Time.to_span_since_epoch |> Time.Span.to_sec |> Int64.of_float |> yojson_of_int64
 ;;
 
 type order = int64
@@ -214,6 +207,12 @@ module Message = struct
         ; photo : Photo.t
         }
       [@@deriving yojson] [@@yojson.allow_extra_fields]
+
+      let best_file { photo = { sizes; _ }; _ } =
+        sizes |> List.last |> Option.map ~f:Photo.Size.photo
+      ;;
+
+      let caption { caption; _ } = Formatted_text.text caption
     end
 
     module Input = struct
@@ -322,6 +321,16 @@ module Message = struct
   end
 
   module Request = struct
+    module Get = struct
+      type t =
+        { chat_id : chat_id
+        ; message_id : message_id
+        }
+      [@@deriving yojson, fields]
+
+      let create = Fields.create
+    end
+
     module View = struct
       type t =
         { chat_id : chat_id
@@ -357,6 +366,15 @@ module Message = struct
           ~chat_id
           ~input_message_content
       ;;
+    end
+
+    module Update_content = struct
+      type t =
+        { chat_id : chat_id
+        ; message_id : message_id
+        ; new_content : Content.t
+        }
+      [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
     end
   end
 
@@ -424,7 +442,11 @@ module Chat = struct
         }
       [@@deriving yojson, fields]
 
-      let create ?(offset_order = Int64.max_int) ?(offset_chat_id = 0L) ?(limit = 100l) ()
+      let create
+          ?(offset_order = Int64.max_value)
+          ?(offset_chat_id = 0L)
+          ?(limit = 100l)
+          ()
         =
         Fields.create ~offset_order ~offset_chat_id ~limit
       ;;
@@ -677,7 +699,7 @@ module User = struct
   [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
 
   let full_name user =
-    String.trim (Printf.sprintf "%s %s" (first_name user) (last_name user))
+    Caml.String.trim (Printf.sprintf "%s %s" (first_name user) (last_name user))
   ;;
 end
 
@@ -721,14 +743,17 @@ module Request = struct
     | Get_contacts
     | Get_chat of chat_id
     | Get_chats of Chat.Request.Get_chats.t
+    | Get_message of Message.Request.Get.t
     | Chats of chat_id list
     | Chat of Chat.t
+    | Message of Message.t
     | Send_message of Message.Request.Send.t
     | View_messages of Message.Request.View.t
     | Cancel_download_file of int32
     | Download_file of File.Request.Download.t
     | Update_authorization_state of Authorization_state.t
     | Update_new_message of Message.t
+    | Update_message_content of Message.Request.Update_content.t
     | Update_new_chat of Chat.t
     | Update_user of User.t
     | Update_user_status of User.Request.Update_status.t
@@ -756,8 +781,10 @@ module Request = struct
     | Get_contacts -> Type_field.yojson_of_t "getContacts"
     | Get_chat chat_id -> create' "getChat" "chat_id" (yojson_of_chat_id chat_id)
     | Get_chats request -> create "getChats" (Chat.Request.Get_chats.yojson_of_t request)
-    | Chats ids -> create' "chats" "chat_ids" (`List (List.map yojson_of_chat_id ids))
+    | Get_message request -> create "getMessage" (Message.Request.Get.yojson_of_t request)
+    | Chats ids -> create' "chats" "chat_ids" (`List (List.map ids ~f:yojson_of_chat_id))
     | Chat chat -> create "chat" (Chat.yojson_of_t chat)
+    | Message message -> create "message" (Message.yojson_of_t message)
     | Send_message request ->
       create "sendMessage" (Message.Request.Send.yojson_of_t request)
     | View_messages request ->
@@ -773,6 +800,8 @@ module Request = struct
         (Authorization_state.yojson_of_t state)
     | Update_new_message message ->
       create' "updateNewMessage" "message" (Message.yojson_of_t message)
+    | Update_message_content request ->
+      create "updateMessageContent" (Message.Request.Update_content.yojson_of_t request)
     | Update_new_chat chat -> create' "updateNewChat" "chat" (Chat.yojson_of_t chat)
     | Update_user user -> create' "updateUser" "user" (User.yojson_of_t user)
     | Update_user_status status ->
@@ -798,8 +827,10 @@ module Request = struct
     | "getContacts" -> Get_contacts
     | "getChat" -> Get_chat (chat_id_of_yojson (member "chat_id" j))
     | "getChats" -> Get_chats (Chat.Request.Get_chats.t_of_yojson j)
+    | "getMessage" -> Get_message (Message.Request.Get.t_of_yojson j)
     | "chats" -> Chats (list_of_yojson chat_id_of_yojson (member "chat_ids" j))
     | "chat" -> Chat (Chat.t_of_yojson j)
+    | "message" -> Message (Message.t_of_yojson j)
     | "sendMessage" -> Send_message (Message.Request.Send.t_of_yojson j)
     | "viewMessages" -> View_messages (Message.Request.View.t_of_yojson j)
     | "cancelDownloadFile" -> Cancel_download_file (int32_of_yojson (member "file_id" j))
@@ -808,6 +839,8 @@ module Request = struct
       Update_authorization_state
         (Authorization_state.t_of_yojson (member "authorization_state" j))
     | "updateNewMessage" -> Update_new_message (Message.t_of_yojson (member "message" j))
+    | "updateMessageContent" ->
+      Update_message_content (Message.Request.Update_content.t_of_yojson j)
     | "updateNewChat" -> Update_new_chat (Chat.t_of_yojson (member "chat" j))
     | "updateUser" -> Update_user (User.t_of_yojson (member "user" j))
     | "updateUserStatus" -> Update_user_status (User.Request.Update_status.t_of_yojson j)

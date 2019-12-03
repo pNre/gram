@@ -24,6 +24,7 @@ type t =
   ; chat_ids : int64 list
   ; chat_actions : Chat_actions.t
   ; unread_messages : Message.t list
+  ; updated_message_ids : Int64.Set.t
   }
 
 let empty =
@@ -33,6 +34,7 @@ let empty =
   ; chat_ids = []
   ; chat_actions = Chat_actions.empty
   ; unread_messages = []
+  ; updated_message_ids = Int64.Set.empty
   }
 ;;
 
@@ -47,6 +49,18 @@ let set_chat state (chat : Chat.t) =
   { state with chats = Chats.set state.chats ~key:(Chat.id chat) ~data:chat }
 ;;
 
+(*Updated messages*)
+let append_updated_message_id state id =
+  { state with updated_message_ids = Int64.Set.add state.updated_message_ids id }
+;;
+
+let remove_updated_message_id state id =
+  { state with updated_message_ids = Int64.Set.remove state.updated_message_ids id }
+;;
+
+let is_message_id_updated state id = Int64.Set.mem state.updated_message_ids id
+
+(*Updated messages*)
 let append_unread_message state message =
   { state with unread_messages = message :: state.unread_messages }
 ;;

@@ -14,19 +14,14 @@ module Update = struct
 end
 
 module Message = struct
-  let display_title message chat_by_id user_by_id =
-    let chat_id = Message.chat_id message in
-    let sender_user_id = Message.sender_user_id message in
-    Update.prefix (chat_by_id chat_id) (user_by_id sender_user_id)
-  ;;
+  open Message.Content
 
-  let display_content_of_photo
-      Message.Content.Photo.{ caption = { text = caption; _ }; photo = { sizes; _ }; _ }
-    =
-    let file = sizes |> List.last_exn |> Photo.Size.photo in
+  let display_content_of_photo photo_content =
+    let open Photo in
+    let file = Option.value_exn (best_file photo_content) in
     let local_file_path = file |> File.local |> File.Local.path in
     let info =
-      [ caption; local_file_path ]
+      [ caption photo_content; local_file_path ]
       |> List.filter ~f:(Fun.negate String.is_empty)
       |> String.concat ~sep:" -> "
     in
@@ -35,9 +30,8 @@ module Message = struct
     else sprintf "[Photo %ld] <%s>" (File.id file) info
   ;;
 
-  let display_content message =
-    match Message.content message with
-    | Message_text text -> Some (Formatted_text.text (Message.Content.Text.text text))
+  let display_content = function
+    | Message_text text -> Some (Formatted_text.text (Text.text text))
     | Message_photo photo when not (List.is_empty photo.photo.sizes) ->
       Some (display_content_of_photo photo)
     | Message_photo _ -> None
@@ -45,9 +39,9 @@ module Message = struct
     | Other _ -> None
   ;;
 
-  let to_description_string message chat_by_id user_by_id =
-    let title = display_title message chat_by_id user_by_id in
-    let content = display_content message in
+  let to_description_string chat user content =
+    let title = Update.prefix chat user in
+    let content = display_content content in
     Option.map content ~f:(fun content -> sprintf "%s: %s\n" title content)
   ;;
 end

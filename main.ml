@@ -1,6 +1,7 @@
 open Async
 open Core
 open Tdlib
+open Tdlib.Models
 
 let api_id = Sys.getenv_exn "TG_API_ID"
 let api_hash = Sys.getenv_exn "TG_API_HASH"
@@ -20,22 +21,55 @@ let request_chats state client chat_ids =
            Client.send client (Get_chats request))
 ;;
 
-let dispatch ~db_path ~debug_mode state client response =
-  let open Models.Request in
-  if debug_mode
-  then
-    Cli.print
-      ~style:[ `Dim ]
-      (sprintf "%s\n" (Yojson.Safe.to_string (yojson_of_t response)));
-  match response with
-  | Update_authorization_state Wait_tdlib_parameters ->
+let print_message state ?(prefix = "") message =
+  let content = Message.content message in
+  let sender_user_id = Message.sender_user_id message in
+  let key = Some (Int32.hash sender_user_id) in
+  let chat = State.chat state (Message.chat_id message) in
+  let user = State.user state sender_user_id in
+  let description = Display.Message.to_description_string chat user content in
+  Option.iter description ~f:(fun description ->
+      Cli.print ~style:[ `Bright ] ~key (sprintf "%s%s\n" prefix description))
+;;
+
+let print_user_status state update =
+  let open User.Request in
+  let user_id = Update_status.user_id update in
+  let status = Update_status.status update in
+  let user = State.user state user_id in
+  let status = Display.User.Status.to_description_string status in
+  Option.iter (Option.both user status) ~f:(fun (user, status) ->
+      Cli.print ~style:[ `Dim; `Yellow ] (sprintf "%s: %s\n" (User.full_name user) status));
+  state
+;;
+
+let print_chat_action state update =
+  let open User.Request in
+  let action = Update_chat_action.action update in
+  let chat_id = Update_chat_action.chat_id update in
+  let user_id = Update_chat_action.user_id update in
+  let chat = State.chat state chat_id in
+  let user = State.user state user_id in
+  let prefix = Display.Update.prefix chat user in
+  let result = Option.map2 user chat ~f:(State.update_chat_action state action) in
+  let state = Option.value_map result ~default:state ~f:snd in
+  result
+  |> Option.map ~f:fst
+  |> Option.bind ~f:Display.Chat.Action.to_description_string
+  |> Option.iter ~f:(fun op ->
+         Cli.print ~style:[ `Dim; `Yellow ] (sprintf "%s: %s\n" prefix op));
+  state
+;;
+
+let dispatch ~db_path state client = function
+  | Request.Update_authorization_state Wait_tdlib_parameters ->
     let db_path =
       match db_path with
       | Some path -> path
       | None -> Sys.getenv_exn "HOME" ^ "/.config/db"
     in
     let parameters =
-      Models.Tdlib.Parameters.create
+      Tdlib.Parameters.create
         ~database_directory:db_path
         ~api_id
         ~api_hash
@@ -63,84 +97,74 @@ let dispatch ~db_path ~debug_mode state client response =
   | Update_authorization_state Ready ->
     Ivar.fill state.State.is_ready ();
     Client.send client Get_contacts;
-    Client.send client (Get_chats (Models.Chat.Request.Get_chats.create ()));
+    Client.send client (Get_chats (Chat.Request.Get_chats.create ()));
     state
   | Chats chat_ids ->
     List.iter chat_ids ~f:(fun id -> Client.send client (Get_chat id));
     request_chats state client chat_ids;
     let current_chat_ids = state.chat_ids in
     State.set_chat_ids state (current_chat_ids @ chat_ids)
+  | Message message when State.is_message_id_updated state (Message.id message) ->
+    print_message ~prefix:"(Updated) " state message;
+    State.remove_updated_message_id state (Message.id message)
   | Update_new_message message ->
-    let key = Some (Int32.hash (Models.Message.sender_user_id message)) in
-    let description =
-      Display.Message.to_description_string message (State.chat state) (State.user state)
-    in
-    Option.iter description ~f:(fun description ->
-        Cli.print ~style:[ `Bright ] ~key (sprintf "%s\n" description));
+    print_message state message;
     State.append_unread_message state message
+  | Update_message_content request ->
+    let open Message.Request in
+    let chat_id = Update_content.chat_id request in
+    let message_id = Update_content.message_id request in
+    let request = Get.create ~chat_id ~message_id in
+    Client.send client (Get_message request);
+    State.append_updated_message_id state message_id
   | Chat chat | Update_new_chat chat -> State.set_chat state chat
   | Update_user user -> State.set_user state user
-  | Update_user_status update ->
-    let open Models.User.Request in
-    let user_id = Update_status.user_id update in
-    let status = Update_status.status update in
-    let user = State.user state user_id in
-    let status = Display.User.Status.to_description_string status in
-    Option.iter (Option.both user status) ~f:(fun (user, status) ->
-        Cli.print
-          ~style:[ `Dim; `Yellow ]
-          (sprintf "%s: %s\n" (Models.User.full_name user) status));
-    state
-  | Update_user_chat_action update ->
-    let open Core in
-    let open Models.User.Request in
-    let action = Update_chat_action.action update in
-    let chat_id = Update_chat_action.chat_id update in
-    let user_id = Update_chat_action.user_id update in
-    let chat = State.chat state chat_id in
-    let user = State.user state user_id in
-    let prefix = Display.Update.prefix chat user in
-    let result = Option.map2 user chat ~f:(State.update_chat_action state action) in
-    let state = Option.value_map result ~default:state ~f:snd in
-    result
-    |> Option.map ~f:fst
-    |> Option.bind ~f:Display.Chat.Action.to_description_string
-    |> Option.iter ~f:(fun op ->
-           Cli.print ~style:[ `Dim; `Yellow ] (sprintf "%s: %s\n" prefix op));
-    state
+  | Update_user_status update -> print_user_status state update
+  | Update_user_chat_action update -> print_chat_action state update
   | Update_file file ->
-    let description = Display.File.Local.to_description_string (Models.File.local file) in
+    let description = Display.File.Local.to_description_string (File.local file) in
     Cli.print ~style:[ `Green ] (sprintf "File: %s\n" description);
     state
   | _ -> state
+;;
+
+let log_if_debug ~debug request =
+  if debug
+  then (
+    let s = Yojson.Safe.to_string (Models.Request.yojson_of_t request) in
+    Cli.print ~style:[ `Dim ] (s ^ "\n"))
 ;;
 
 let cli client state () =
   State.when_ready (Mvar.peek_exn state) >>= Cli.parse client state Cmds.exec
 ;;
 
-let receive_and_dispatch ~db_path ~debug_mode client state () =
+let receive_and_dispatch ~db_path ~debug client state () =
   Client.receive client
   >>= (fun msg ->
         let state = Mvar.peek_exn state in
-        match msg with
-        | None -> return state
-        | Some (Ok response) ->
-          return (dispatch ~db_path ~debug_mode state client response)
-        | Some (Error err) ->
-          Cli.print (sprintf "Error parsing message: %s\n" (Exn.to_string err));
-          return state)
-  >>| fun new_state -> Mvar.set state new_state
+        let result =
+          match msg with
+          | None -> state
+          | Some (Ok request) ->
+            log_if_debug ~debug request;
+            dispatch ~db_path state client request
+          | Some (Error err) ->
+            Cli.print (sprintf "Error parsing message: %s\n" (Exn.to_string err));
+            state
+        in
+        return result)
+  >>| Mvar.set state
 ;;
 
-let start ~db_path ~debug_mode =
+let start ~db_path ~debug =
   ignore (Client.execute (Models.Request.Set_log_verbosity_level Error));
   let client = Client.init () in
   let state = Mvar.create () in
   Mvar.set state State.empty;
   Cli.configure state;
   Deferred.forever () (cli client state);
-  Deferred.forever () (receive_and_dispatch ~db_path ~debug_mode client state);
+  Deferred.forever () (receive_and_dispatch ~db_path ~debug client state);
   Shutdown.at_shutdown (fun _ -> return (Client.deinit client));
   Deferred.never ()
 ;;
@@ -156,10 +180,8 @@ let () =
               "database"
               (optional string)
               ~doc:"path Database folder path, defaults to ~/.config/gram"
-          and debug_mode =
-            flag "debug" (optional bool) ~doc:"true|false Debug mode enabled"
-          in
-          fun () -> start ~db_path ~debug_mode:(Option.value ~default:false debug_mode)])
+          and debug = flag "debug" (optional bool) ~doc:"true|false Debug mode enabled" in
+          fun () -> start ~db_path ~debug:(Option.value ~default:false debug)])
   in
   Command.run command
 ;;
