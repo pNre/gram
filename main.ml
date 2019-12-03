@@ -53,10 +53,10 @@ let print_user_status state update =
 ;;
 
 let print_chat_action state update =
-  let open User.Request in
-  let action = Update_chat_action.action update in
-  let chat_id = Update_chat_action.chat_id update in
-  let user_id = Update_chat_action.user_id update in
+  let open Chat.Request in
+  let action = Update_action.action update in
+  let chat_id = Update_action.chat_id update in
+  let user_id = Update_action.user_id update in
   let chat = State.chat state chat_id in
   let user = State.user state user_id in
   let prefix = Display.Update.prefix chat user in

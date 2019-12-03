@@ -4,18 +4,13 @@ open Tdlib.Models
 module Map (K : Map.S) (V : T) = struct
   include K
 
-  type t = (Key.t, V.t, Key.comparator_witness) Base.Map.t
+  type t = (Key.t, V.t, Key.comparator_witness) Map.t
 end
 
-module Users = Map (Int32.Map) (User)
-module Users_status = Map (Int32.Map) (User.Status)
-module Chats = Map (Int64.Map) (Chat)
-
-module Chat_action_key = struct
-  include Tuple.Make (Int32) (Int64)
-  include Tuple.Comparable (Int32) (Int64)
-end
-
+module Users = Map (User.Id.Map) (User)
+module Users_status = Map (User.Id.Map) (User.Status)
+module Chats = Map (Chat.Id.Map) (Chat)
+module Chat_action_key = Tuple.Comparable (User.Id) (Chat.Id)
 module Chat_actions = Map (Chat_action_key.Map) (Chat.Action)
 
 type t =
@@ -37,20 +32,22 @@ let empty =
   ; chat_ids = []
   ; chat_actions = Chat_actions.empty
   ; unread_messages = []
-  ; updated_message_ids = Int64.Set.empty
+  ; updated_message_ids = Message.Id.Set.empty
   }
 ;;
 
 (*Updated messages*)
 let append_updated_message_id state id =
-  { state with updated_message_ids = Int64.Set.add state.updated_message_ids id }
+  { state with updated_message_ids = Message.Id.Set.add state.updated_message_ids id }
 ;;
 
 let remove_updated_message_id state id =
-  { state with updated_message_ids = Int64.Set.remove state.updated_message_ids id }
+  { state with updated_message_ids = Message.Id.Set.remove state.updated_message_ids id }
 ;;
 
-let is_message_id_updated state id = Int64.Set.mem state.updated_message_ids id
+let is_message_id_updated { updated_message_ids; _ } =
+  Message.Id.Set.mem updated_message_ids
+;;
 
 (*Updated messages*)
 let append_unread_message state message =
@@ -60,14 +57,14 @@ let append_unread_message state message =
 let set_unread_messages state unread_messages = { state with unread_messages }
 
 (*Events*)
-let when_ready state = Async.Ivar.read state.is_ready
+let when_ready { is_ready; _ } = Async.Ivar.read is_ready
 
 (*Users*)
 let set_user state user =
   { state with users = Users.set state.users ~key:(User.id user) ~data:user }
 ;;
 
-let user state id = Users.find state.users id
+let user { users; _ } = Users.find users
 
 let users_by_name state name =
   Users.to_alist state.users
@@ -111,10 +108,10 @@ let lookup_chats state q =
 ;;
 
 let find_chat state q =
-  let user_ids = q |> users_by_name state |> List.map ~f:User.id |> Int32.Set.of_list in
+  let user_ids = q |> users_by_name state |> List.map ~f:User.id |> User.Id.Set.of_list in
   let matches_user chat =
     match Chat.typ chat with
-    | Private { user_id; _ } | Secret { user_id; _ } -> Int32.Set.mem user_ids user_id
+    | Private { user_id; _ } | Secret { user_id; _ } -> User.Id.Set.mem user_ids user_id
     | _ -> false
   in
   let matches_title chat = String.Caseless.equal (Chat.title chat) q in

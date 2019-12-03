@@ -1,40 +1,29 @@
 open Core
 open Yojson.Safe.Util
 
-type user_id = int32
+module Time = struct
+  include Time
 
-let user_id_of_yojson = int32_of_yojson
-let yojson_of_user_id = yojson_of_int32
+  let t_of_yojson j =
+    j |> int64_of_yojson |> Int64.to_float |> Time.Span.of_sec |> Time.of_span_since_epoch
+  ;;
 
-type chat_id = int64
+  let yojson_of_t t =
+    t |> Time.to_span_since_epoch |> Time.Span.to_sec |> Int64.of_float |> yojson_of_int64
+  ;;
+end
 
-let chat_id_of_yojson = int64_of_yojson
-let yojson_of_chat_id = yojson_of_int64
+module Order = struct
+  include Int64
 
-type message_id = int64
+  let t_of_yojson j =
+    match j with
+    | `String s -> Int64.of_string s
+    | _ -> int64_of_yojson j
+  ;;
 
-let message_id_of_yojson = int64_of_yojson
-let yojson_of_message_id = yojson_of_int64
-
-type time = Time.t
-
-let time_of_yojson j =
-  j |> int64_of_yojson |> Int64.to_float |> Time.Span.of_sec |> Time.of_span_since_epoch
-;;
-
-let yojson_of_time t =
-  t |> Time.to_span_since_epoch |> Time.Span.to_sec |> Int64.of_float |> yojson_of_int64
-;;
-
-type order = int64
-
-let order_of_yojson j =
-  match j with
-  | `String s -> Int64.of_string s
-  | _ -> int64_of_yojson j
-;;
-
-let yojson_of_order = yojson_of_int64
+  let yojson_of_t = yojson_of_int64
+end
 
 module Tdlib = struct
   module Parameters = struct
@@ -97,6 +86,291 @@ type update_option =
   ; value : Option_value.t
   }
 [@@deriving yojson]
+
+module User = struct
+  module Id = struct
+    include Int32
+
+    let t_of_yojson = int32_of_yojson
+    let yojson_of_t = yojson_of_int32
+  end
+
+  module Status = struct
+    type t =
+      | Empty
+      | Last_month
+      | Last_week
+      | Offline
+      | Online
+      | Recently
+      | Other of Yojson.Safe.t
+
+    let yojson_of_t = function
+      | Empty -> Type_field.yojson_of_t "userStatusEmpty"
+      | Last_month -> Type_field.yojson_of_t "userStatusLastMonth"
+      | Last_week -> Type_field.yojson_of_t "userStatusLastWeek"
+      | Offline -> Type_field.yojson_of_t "userStatusOffline"
+      | Online -> Type_field.yojson_of_t "userStatusOnline"
+      | Recently -> Type_field.yojson_of_t "userStatusRecently"
+      | Other j -> j
+    ;;
+
+    let t_of_yojson j =
+      match Type_field.t_of_yojson j with
+      | "userStatusEmpty" -> Empty
+      | "userStatusLastMonth" -> Last_month
+      | "userStatusLastWeek" -> Last_week
+      | "userStatusOffline" -> Offline
+      | "userStatusOnline" -> Online
+      | "userStatusRecently" -> Recently
+      | _ -> Other j
+    ;;
+  end
+
+  module Type = struct
+    type t =
+      | Bot
+      | Deleted
+      | Regular
+      | Unknown
+      | Other of Yojson.Safe.t
+
+    let yojson_of_t = function
+      | Bot -> Type_field.yojson_of_t "userTypeBot"
+      | Deleted -> Type_field.yojson_of_t "userTypeDeleted"
+      | Regular -> Type_field.yojson_of_t "userTypeRegular"
+      | Unknown -> Type_field.yojson_of_t "userTypeUnknown"
+      | Other j -> j
+    ;;
+
+    let t_of_yojson j =
+      match Type_field.t_of_yojson j with
+      | "userTypeBot" -> Bot
+      | "userTypeDeleted" -> Deleted
+      | "userTypeRegular" -> Regular
+      | "userTypeUnknown" -> Unknown
+      | _ -> Other j
+    ;;
+  end
+
+  module Link_state = struct
+    type t =
+      | Is_contact
+      | Knows_phone_number
+      | None
+      | Other of Yojson.Safe.t
+
+    let yojson_of_t = function
+      | Is_contact -> Type_field.yojson_of_t "linkStateIsContact"
+      | Knows_phone_number -> Type_field.yojson_of_t "linkStateKnowsPhoneNumber"
+      | None -> Type_field.yojson_of_t "linkStateNone"
+      | Other j -> j
+    ;;
+
+    let t_of_yojson j =
+      match Type_field.t_of_yojson j with
+      | "linkStateIsContact" -> Is_contact
+      | "linkStateKnowsPhoneNumber" -> Knows_phone_number
+      | "linkStateNone" -> None
+      | _ -> Other j
+    ;;
+  end
+
+  module Request = struct
+    module Update_status = struct
+      type t =
+        { user_id : Id.t
+        ; status : Status.t
+        }
+      [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
+    end
+  end
+
+  type t =
+    { id : Id.t
+    ; first_name : string
+    ; last_name : string
+    ; username : string
+    ; phone_number : string
+    ; status : Status.t
+    ; outgoing_link : Link_state.t
+    ; incoming_link : Link_state.t
+    ; is_verified : bool
+    ; is_support : bool
+    ; restriction_reason : string
+    ; is_scam : bool
+    ; have_access : bool
+    ; typ : Type.t [@key "type"]
+    ; language_code : string
+    }
+  [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
+
+  let full_name user =
+    Caml.String.trim (Printf.sprintf "%s %s" (first_name user) (last_name user))
+  ;;
+end
+
+module Chat = struct
+  module Id = struct
+    include Int64
+
+    let t_of_yojson = int64_of_yojson
+    let yojson_of_t = yojson_of_int64
+  end
+
+  module Type = struct
+    type basic_group = { basic_group_id : int32 }
+    [@@deriving yojson] [@@yojson.allow_extra_fields]
+
+    type private_ = { user_id : User.Id.t }
+    [@@deriving yojson] [@@yojson.allow_extra_fields]
+
+    type secret =
+      { secret_chat_id : int32
+      ; user_id : User.Id.t
+      }
+    [@@deriving yojson] [@@yojson.allow_extra_fields]
+
+    type supergroup =
+      { supergroup_id : int32
+      ; is_channel : bool
+      }
+    [@@deriving yojson] [@@yojson.allow_extra_fields]
+
+    type t =
+      | Basic_group of basic_group
+      | Private of private_
+      | Secret of secret
+      | Supergroup of supergroup
+      | Other of Yojson.Safe.t
+
+    let yojson_of_t = function
+      | Basic_group group ->
+        combine
+          (Type_field.yojson_of_t "chatTypeBasicGroup")
+          (yojson_of_basic_group group)
+      | Private priv ->
+        combine (Type_field.yojson_of_t "chatTypePrivate") (yojson_of_private_ priv)
+      | Secret secret ->
+        combine (Type_field.yojson_of_t "chatTypeSecret") (yojson_of_secret secret)
+      | Supergroup group ->
+        combine (Type_field.yojson_of_t "chatTypeSupergroup") (yojson_of_supergroup group)
+      | Other j -> j
+    ;;
+
+    let t_of_yojson j =
+      match Type_field.t_of_yojson j with
+      | "chatTypeBasicGroup" -> Basic_group (basic_group_of_yojson j)
+      | "chatTypePrivate" -> Private (private__of_yojson j)
+      | "chatTypeSecret" -> Secret (secret_of_yojson j)
+      | "chatTypeSupergroup" -> Supergroup (supergroup_of_yojson j)
+      | _ -> Other j
+    ;;
+  end
+
+  module Action = struct
+    type t =
+      | Cancel
+      | Choosing_contact
+      | Choosing_location
+      | Recording_video
+      | Recording_video_note
+      | Recording_voice_note
+      | Start_playing_game
+      | Typing
+      | Uploading_document
+      | Uploading_photo
+      | Uploading_video
+      | Uploading_video_note
+      | Uploading_voice_note
+      | Other of Yojson.Safe.t
+
+    let yojson_of_t = function
+      | Cancel -> Type_field.yojson_of_t "chatActionCancel"
+      | Choosing_contact -> Type_field.yojson_of_t "chatActionChoosingContact"
+      | Choosing_location -> Type_field.yojson_of_t "chatActionChoosingLocation"
+      | Recording_video -> Type_field.yojson_of_t "chatActionRecordingVideo"
+      | Recording_video_note -> Type_field.yojson_of_t "chatActionRecordingVideoNote"
+      | Recording_voice_note -> Type_field.yojson_of_t "chatActionRecordingVoiceNote"
+      | Start_playing_game -> Type_field.yojson_of_t "chatActionStartPlayingGame"
+      | Typing -> Type_field.yojson_of_t "chatActionTyping"
+      | Uploading_document -> Type_field.yojson_of_t "chatActionUploadingDocument"
+      | Uploading_photo -> Type_field.yojson_of_t "chatActionUploadingPhoto"
+      | Uploading_video -> Type_field.yojson_of_t "chatActionUploadingVideo"
+      | Uploading_video_note -> Type_field.yojson_of_t "chatActionUploadingVideoNote"
+      | Uploading_voice_note -> Type_field.yojson_of_t "chatActionUploadingVoiceNote"
+      | Other j -> j
+    ;;
+
+    let t_of_yojson j =
+      match Type_field.t_of_yojson j with
+      | "chatActionCancel" -> Cancel
+      | "chatActionChoosingContact" -> Choosing_contact
+      | "chatActionChoosingLocation" -> Choosing_location
+      | "chatActionRecordingVideo" -> Recording_video
+      | "chatActionRecordingVideoNote" -> Recording_video_note
+      | "chatActionRecordingVoiceNote" -> Recording_voice_note
+      | "chatActionStartPlayingGame" -> Start_playing_game
+      | "chatActionTyping" -> Typing
+      | "chatActionUploadingDocument" -> Uploading_document
+      | "chatActionUploadingPhoto" -> Uploading_photo
+      | "chatActionUploadingVideo" -> Uploading_video
+      | "chatActionUploadingVideoNote" -> Uploading_video_note
+      | "chatActionUploadingVoiceNote" -> Uploading_voice_note
+      | _ -> Other j
+    ;;
+  end
+
+  module Request = struct
+    module Get_chats = struct
+      type t =
+        { offset_order : int64
+        ; offset_chat_id : Id.t
+        ; limit : int32
+        }
+      [@@deriving yojson, fields]
+
+      let create
+          ?(offset_order = Int64.max_value)
+          ?(offset_chat_id = 0L)
+          ?(limit = 100l)
+          ()
+        =
+        Fields.create ~offset_order ~offset_chat_id ~limit
+      ;;
+    end
+
+    module Update_action = struct
+      type t =
+        { chat_id : Id.t
+        ; user_id : User.Id.t
+        ; action : Action.t
+        }
+      [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
+    end
+  end
+
+  type t =
+    { id : Id.t
+    ; title : string
+    ; typ : Type.t [@key "type"]
+    ; order : Order.t
+    ; is_pinned : bool
+    ; is_marked_as_unread : bool
+    ; is_sponsored : bool
+    ; can_be_deleted_only_for_self : bool
+    ; can_be_deleted_for_all_users : bool
+    ; unread_count : int32
+    ; unread_mention_count : int32
+    }
+  [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
+
+  let user_id chat =
+    match typ chat with
+    | Basic_group _ | Supergroup _ | Other _ -> None
+    | Private { user_id; _ } | Secret { user_id; _ } -> Some user_id
+  ;;
+end
 
 module File = struct
   module Local = struct
@@ -185,6 +459,13 @@ module Formatted_text = struct
 end
 
 module Message = struct
+  module Id = struct
+    include Int64
+
+    let t_of_yojson = int64_of_yojson
+    let yojson_of_t = yojson_of_int64
+  end
+
   module Content = struct
     module Text = struct
       type t = { text : Formatted_text.t }
@@ -323,8 +604,8 @@ module Message = struct
   module Request = struct
     module Get = struct
       type t =
-        { chat_id : chat_id
-        ; message_id : message_id
+        { chat_id : Chat.Id.t
+        ; message_id : Id.t
         }
       [@@deriving yojson, fields]
 
@@ -333,8 +614,8 @@ module Message = struct
 
     module View = struct
       type t =
-        { chat_id : chat_id
-        ; message_ids : message_id list
+        { chat_id : Chat.Id.t
+        ; message_ids : Id.t list
         ; force_read : bool
         }
       [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
@@ -344,8 +625,8 @@ module Message = struct
 
     module Send = struct
       type t =
-        { chat_id : chat_id
-        ; reply_to_message_id : message_id
+        { chat_id : Chat.Id.t
+        ; reply_to_message_id : Id.t
         ; disable_notification : bool
         ; from_background : bool
         ; input_message_content : Content.Input.t
@@ -370,8 +651,8 @@ module Message = struct
 
     module Update_content = struct
       type t =
-        { chat_id : chat_id
-        ; message_id : message_id
+        { chat_id : Chat.Id.t
+        ; message_id : Id.t
         ; new_content : Content.t
         }
       [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
@@ -380,8 +661,8 @@ module Message = struct
 
   type t =
     { id : int64
-    ; sender_user_id : user_id
-    ; chat_id : chat_id
+    ; sender_user_id : User.Id.t
+    ; chat_id : Chat.Id.t
     ; is_outgoing : bool
     ; can_be_edited : bool
     ; can_be_forwarded : bool
@@ -389,8 +670,8 @@ module Message = struct
     ; can_be_deleted_for_all_users : bool
     ; is_channel_post : bool
     ; contains_unread_mention : bool
-    ; date : time
-    ; edit_date : time
+    ; date : Time.t
+    ; edit_date : Time.t
     ; reply_to_message_id : int64
     ; ttl : int32
     ; ttl_expires_in : float
@@ -432,277 +713,6 @@ module Log = struct
   end
 end
 
-module Chat = struct
-  module Request = struct
-    module Get_chats = struct
-      type t =
-        { offset_order : int64
-        ; offset_chat_id : chat_id
-        ; limit : int32
-        }
-      [@@deriving yojson, fields]
-
-      let create
-          ?(offset_order = Int64.max_value)
-          ?(offset_chat_id = 0L)
-          ?(limit = 100l)
-          ()
-        =
-        Fields.create ~offset_order ~offset_chat_id ~limit
-      ;;
-    end
-  end
-
-  module Type = struct
-    type basic_group = { basic_group_id : int32 }
-    [@@deriving yojson] [@@yojson.allow_extra_fields]
-
-    type private_ = { user_id : user_id }
-    [@@deriving yojson] [@@yojson.allow_extra_fields]
-
-    type secret =
-      { secret_chat_id : int32
-      ; user_id : user_id
-      }
-    [@@deriving yojson] [@@yojson.allow_extra_fields]
-
-    type supergroup =
-      { supergroup_id : int32
-      ; is_channel : bool
-      }
-    [@@deriving yojson] [@@yojson.allow_extra_fields]
-
-    type t =
-      | Basic_group of basic_group
-      | Private of private_
-      | Secret of secret
-      | Supergroup of supergroup
-      | Other of Yojson.Safe.t
-
-    let yojson_of_t = function
-      | Basic_group group ->
-        combine
-          (Type_field.yojson_of_t "chatTypeBasicGroup")
-          (yojson_of_basic_group group)
-      | Private priv ->
-        combine (Type_field.yojson_of_t "chatTypePrivate") (yojson_of_private_ priv)
-      | Secret secret ->
-        combine (Type_field.yojson_of_t "chatTypeSecret") (yojson_of_secret secret)
-      | Supergroup group ->
-        combine (Type_field.yojson_of_t "chatTypeSupergroup") (yojson_of_supergroup group)
-      | Other j -> j
-    ;;
-
-    let t_of_yojson j =
-      match Type_field.t_of_yojson j with
-      | "chatTypeBasicGroup" -> Basic_group (basic_group_of_yojson j)
-      | "chatTypePrivate" -> Private (private__of_yojson j)
-      | "chatTypeSecret" -> Secret (secret_of_yojson j)
-      | "chatTypeSupergroup" -> Supergroup (supergroup_of_yojson j)
-      | _ -> Other j
-    ;;
-  end
-
-  module Action = struct
-    type t =
-      | Cancel
-      | Choosing_contact
-      | Choosing_location
-      | Recording_video
-      | Recording_video_note
-      | Recording_voice_note
-      | Start_playing_game
-      | Typing
-      | Uploading_document
-      | Uploading_photo
-      | Uploading_video
-      | Uploading_video_note
-      | Uploading_voice_note
-      | Other of Yojson.Safe.t
-
-    let yojson_of_t = function
-      | Cancel -> Type_field.yojson_of_t "chatActionCancel"
-      | Choosing_contact -> Type_field.yojson_of_t "chatActionChoosingContact"
-      | Choosing_location -> Type_field.yojson_of_t "chatActionChoosingLocation"
-      | Recording_video -> Type_field.yojson_of_t "chatActionRecordingVideo"
-      | Recording_video_note -> Type_field.yojson_of_t "chatActionRecordingVideoNote"
-      | Recording_voice_note -> Type_field.yojson_of_t "chatActionRecordingVoiceNote"
-      | Start_playing_game -> Type_field.yojson_of_t "chatActionStartPlayingGame"
-      | Typing -> Type_field.yojson_of_t "chatActionTyping"
-      | Uploading_document -> Type_field.yojson_of_t "chatActionUploadingDocument"
-      | Uploading_photo -> Type_field.yojson_of_t "chatActionUploadingPhoto"
-      | Uploading_video -> Type_field.yojson_of_t "chatActionUploadingVideo"
-      | Uploading_video_note -> Type_field.yojson_of_t "chatActionUploadingVideoNote"
-      | Uploading_voice_note -> Type_field.yojson_of_t "chatActionUploadingVoiceNote"
-      | Other j -> j
-    ;;
-
-    let t_of_yojson j =
-      match Type_field.t_of_yojson j with
-      | "chatActionCancel" -> Cancel
-      | "chatActionChoosingContact" -> Choosing_contact
-      | "chatActionChoosingLocation" -> Choosing_location
-      | "chatActionRecordingVideo" -> Recording_video
-      | "chatActionRecordingVideoNote" -> Recording_video_note
-      | "chatActionRecordingVoiceNote" -> Recording_voice_note
-      | "chatActionStartPlayingGame" -> Start_playing_game
-      | "chatActionTyping" -> Typing
-      | "chatActionUploadingDocument" -> Uploading_document
-      | "chatActionUploadingPhoto" -> Uploading_photo
-      | "chatActionUploadingVideo" -> Uploading_video
-      | "chatActionUploadingVideoNote" -> Uploading_video_note
-      | "chatActionUploadingVoiceNote" -> Uploading_voice_note
-      | _ -> Other j
-    ;;
-  end
-
-  type t =
-    { id : chat_id
-    ; title : string
-    ; typ : Type.t [@key "type"]
-    ; order : order
-    ; is_pinned : bool
-    ; is_marked_as_unread : bool
-    ; is_sponsored : bool
-    ; can_be_deleted_only_for_self : bool
-    ; can_be_deleted_for_all_users : bool
-    ; unread_count : int32
-    ; unread_mention_count : int32
-    }
-  [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
-
-  let user_id chat =
-    match typ chat with
-    | Basic_group _ | Supergroup _ | Other _ -> None
-    | Private { user_id; _ } | Secret { user_id; _ } -> Some user_id
-  ;;
-end
-
-module User = struct
-  module Status = struct
-    type t =
-      | Empty
-      | Last_month
-      | Last_week
-      | Offline
-      | Online
-      | Recently
-      | Other of Yojson.Safe.t
-
-    let yojson_of_t = function
-      | Empty -> Type_field.yojson_of_t "userStatusEmpty"
-      | Last_month -> Type_field.yojson_of_t "userStatusLastMonth"
-      | Last_week -> Type_field.yojson_of_t "userStatusLastWeek"
-      | Offline -> Type_field.yojson_of_t "userStatusOffline"
-      | Online -> Type_field.yojson_of_t "userStatusOnline"
-      | Recently -> Type_field.yojson_of_t "userStatusRecently"
-      | Other j -> j
-    ;;
-
-    let t_of_yojson j =
-      match Type_field.t_of_yojson j with
-      | "userStatusEmpty" -> Empty
-      | "userStatusLastMonth" -> Last_month
-      | "userStatusLastWeek" -> Last_week
-      | "userStatusOffline" -> Offline
-      | "userStatusOnline" -> Online
-      | "userStatusRecently" -> Recently
-      | _ -> Other j
-    ;;
-  end
-
-  module Type = struct
-    type t =
-      | Bot
-      | Deleted
-      | Regular
-      | Unknown
-      | Other of Yojson.Safe.t
-
-    let yojson_of_t = function
-      | Bot -> Type_field.yojson_of_t "userTypeBot"
-      | Deleted -> Type_field.yojson_of_t "userTypeDeleted"
-      | Regular -> Type_field.yojson_of_t "userTypeRegular"
-      | Unknown -> Type_field.yojson_of_t "userTypeUnknown"
-      | Other j -> j
-    ;;
-
-    let t_of_yojson j =
-      match Type_field.t_of_yojson j with
-      | "userTypeBot" -> Bot
-      | "userTypeDeleted" -> Deleted
-      | "userTypeRegular" -> Regular
-      | "userTypeUnknown" -> Unknown
-      | _ -> Other j
-    ;;
-  end
-
-  module Link_state = struct
-    type t =
-      | Is_contact
-      | Knows_phone_number
-      | None
-      | Other of Yojson.Safe.t
-
-    let yojson_of_t = function
-      | Is_contact -> Type_field.yojson_of_t "linkStateIsContact"
-      | Knows_phone_number -> Type_field.yojson_of_t "linkStateKnowsPhoneNumber"
-      | None -> Type_field.yojson_of_t "linkStateNone"
-      | Other j -> j
-    ;;
-
-    let t_of_yojson j =
-      match Type_field.t_of_yojson j with
-      | "linkStateIsContact" -> Is_contact
-      | "linkStateKnowsPhoneNumber" -> Knows_phone_number
-      | "linkStateNone" -> None
-      | _ -> Other j
-    ;;
-  end
-
-  module Request = struct
-    module Update_status = struct
-      type t =
-        { user_id : user_id
-        ; status : Status.t
-        }
-      [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
-    end
-
-    module Update_chat_action = struct
-      type t =
-        { chat_id : chat_id
-        ; user_id : user_id
-        ; action : Chat.Action.t
-        }
-      [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
-    end
-  end
-
-  type t =
-    { id : user_id
-    ; first_name : string
-    ; last_name : string
-    ; username : string
-    ; phone_number : string
-    ; status : Status.t
-    ; outgoing_link : Link_state.t
-    ; incoming_link : Link_state.t
-    ; is_verified : bool
-    ; is_support : bool
-    ; restriction_reason : string
-    ; is_scam : bool
-    ; have_access : bool
-    ; typ : Type.t [@key "type"]
-    ; language_code : string
-    }
-  [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
-
-  let full_name user =
-    Caml.String.trim (Printf.sprintf "%s %s" (first_name user) (last_name user))
-  ;;
-end
-
 module Authorization_state = struct
   type t =
     | Wait_tdlib_parameters
@@ -741,10 +751,10 @@ module Request = struct
     | Check_database_encryption_key of string
     | Check_authentication_code of string
     | Get_contacts
-    | Get_chat of chat_id
+    | Get_chat of Chat.Id.t
     | Get_chats of Chat.Request.Get_chats.t
     | Get_message of Message.Request.Get.t
-    | Chats of chat_id list
+    | Chats of Chat.Id.t list
     | Chat of Chat.t
     | Message of Message.t
     | Send_message of Message.Request.Send.t
@@ -757,7 +767,7 @@ module Request = struct
     | Update_new_chat of Chat.t
     | Update_user of User.t
     | Update_user_status of User.Request.Update_status.t
-    | Update_user_chat_action of User.Request.Update_chat_action.t
+    | Update_user_chat_action of Chat.Request.Update_action.t
     | Update_file of File.t
     | Other of Yojson.Safe.t
 
@@ -779,10 +789,11 @@ module Request = struct
     | Check_authentication_code code ->
       create' "checkAuthenticationCode" "code" (`String code)
     | Get_contacts -> Type_field.yojson_of_t "getContacts"
-    | Get_chat chat_id -> create' "getChat" "chat_id" (yojson_of_chat_id chat_id)
+    | Get_chat chat_id -> create' "getChat" "chat_id" (Chat.Id.yojson_of_t chat_id)
     | Get_chats request -> create "getChats" (Chat.Request.Get_chats.yojson_of_t request)
     | Get_message request -> create "getMessage" (Message.Request.Get.yojson_of_t request)
-    | Chats ids -> create' "chats" "chat_ids" (`List (List.map ids ~f:yojson_of_chat_id))
+    | Chats ids ->
+      create' "chats" "chat_ids" (`List (List.map ids ~f:Chat.Id.yojson_of_t))
     | Chat chat -> create "chat" (Chat.yojson_of_t chat)
     | Message message -> create "message" (Message.yojson_of_t message)
     | Send_message request ->
@@ -807,7 +818,7 @@ module Request = struct
     | Update_user_status status ->
       create "updateUserStatus" (User.Request.Update_status.yojson_of_t status)
     | Update_user_chat_action action ->
-      create "updateUserChatAction" (User.Request.Update_chat_action.yojson_of_t action)
+      create "updateUserChatAction" (Chat.Request.Update_action.yojson_of_t action)
     | Update_file file -> create' "updateFile" "file" (File.yojson_of_t file)
     | Other j -> j
   ;;
@@ -825,10 +836,10 @@ module Request = struct
       Check_database_encryption_key (to_string (member "key" j))
     | "checkAuthenticationCode" -> Check_authentication_code (to_string (member "code" j))
     | "getContacts" -> Get_contacts
-    | "getChat" -> Get_chat (chat_id_of_yojson (member "chat_id" j))
+    | "getChat" -> Get_chat (Chat.Id.t_of_yojson (member "chat_id" j))
     | "getChats" -> Get_chats (Chat.Request.Get_chats.t_of_yojson j)
     | "getMessage" -> Get_message (Message.Request.Get.t_of_yojson j)
-    | "chats" -> Chats (list_of_yojson chat_id_of_yojson (member "chat_ids" j))
+    | "chats" -> Chats (list_of_yojson Chat.Id.t_of_yojson (member "chat_ids" j))
     | "chat" -> Chat (Chat.t_of_yojson j)
     | "message" -> Message (Message.t_of_yojson j)
     | "sendMessage" -> Send_message (Message.Request.Send.t_of_yojson j)
@@ -845,7 +856,7 @@ module Request = struct
     | "updateUser" -> Update_user (User.t_of_yojson (member "user" j))
     | "updateUserStatus" -> Update_user_status (User.Request.Update_status.t_of_yojson j)
     | "updateUserChatAction" ->
-      Update_user_chat_action (User.Request.Update_chat_action.t_of_yojson j)
+      Update_user_chat_action (Chat.Request.Update_action.t_of_yojson j)
     | "updateFile" -> Update_file (File.t_of_yojson (member "file" j))
     | _ -> Other j
   ;;
