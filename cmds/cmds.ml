@@ -13,17 +13,25 @@ module Parser = struct
   let identifier = take_while1 is_identifier <?> "identifier"
   let whitespaces = take_while is_whitespace <?> "whitespaces"
   let escaped_space = char escape *> satisfy is_whitespace
+  let escaped_quote = char escape *> char quote
 
   let string_literal =
-    let quoted = char quote *> many (not_char quote) <* char quote <?> "quoted string" in
-    let escaped = many1 (escaped_space <|> satisfy is_identifier) <?> "escaped string" in
+    let quoted =
+      char quote *> many (escaped_quote <|> not_char quote)
+      <* char quote
+      <?> "quoted string"
+    in
+    let escaped =
+      many1 (escaped_space <|> escaped_quote <|> satisfy is_identifier)
+      <?> "escaped string"
+    in
     quoted <|> escaped >>| String.of_char_list
   ;;
 
   let parse =
     parse_string
       (many_till
-         (whitespaces *> string_literal <|> identifier <* whitespaces)
+         (whitespaces *> (string_literal <|> identifier) <* whitespaces)
          end_of_input)
   ;;
 end
