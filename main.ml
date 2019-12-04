@@ -21,7 +21,7 @@ let request_chats state client chat_ids =
            Client.send client (Get_chats request))
 ;;
 
-let print_message state ?(prefix = "") message =
+let handle_message state ?(prefix = "") message =
   let content = Message.content message in
   let sender_user_id = Message.sender_user_id message in
   let key = Some (Int32.hash sender_user_id) in
@@ -32,7 +32,7 @@ let print_message state ?(prefix = "") message =
       Cli.print ~style:[ `Bright ] ~key (sprintf "%s%s\n" prefix description))
 ;;
 
-let print_user_status state update =
+let handle_user_status state update =
   let open User.Request in
   let user_id = Update_status.user_id update in
   let status = Update_status.status update in
@@ -52,13 +52,11 @@ let print_user_status state update =
   | _ -> state
 ;;
 
-let print_chat_action state update =
+let handle_chat_action state update =
   let open Chat.Request in
   let action = Update_action.action update in
-  let chat_id = Update_action.chat_id update in
-  let user_id = Update_action.user_id update in
-  let chat = State.chat state chat_id in
-  let user = State.user state user_id in
+  let chat = update |> Update_action.chat_id |> State.chat state in
+  let user = update |> Update_action.user_id |> State.user state in
   let prefix = Display.Update.prefix chat user in
   let result = Option.map2 user chat ~f:(State.update_chat_action state action) in
   let state = Option.value_map result ~default:state ~f:snd in
@@ -67,6 +65,18 @@ let print_chat_action state update =
   |> Option.bind ~f:Display.Chat.Action.to_description_string
   |> Option.iter ~f:(fun op ->
          Cli.print ~style:[ `Dim; `Yellow ] (sprintf "%s: %s\n" prefix op));
+  state
+;;
+
+let handle_chat_read_inbox_update state update =
+  if Chat.Read_inbox.unread_count update = 0l
+  then
+    update
+    |> Chat.Read_inbox.chat_id
+    |> State.chat state
+    |> Option.map ~f:Chat.title
+    |> Option.iter ~f:(fun chat_title ->
+           Cli.print ~style:[ `Dim; `Magenta ] (sprintf "%s marked as read\n" chat_title));
   state
 ;;
 
@@ -114,10 +124,10 @@ let dispatch ~db_path state client = function
     let current_chat_ids = state.chat_ids in
     State.set_chat_ids state (current_chat_ids @ chat_ids)
   | Message message when State.is_message_id_updated state (Message.id message) ->
-    print_message ~prefix:"(Updated) " state message;
+    handle_message ~prefix:"(Updated) " state message;
     State.remove_updated_message_id state (Message.id message)
   | Update_new_message message ->
-    print_message state message;
+    handle_message state message;
     State.append_unread_message state message
   | Update_message_content request ->
     let open Message.Request in
@@ -128,8 +138,9 @@ let dispatch ~db_path state client = function
     State.append_updated_message_id state message_id
   | Chat chat | Update_new_chat chat -> State.set_chat state chat
   | Update_user user -> State.set_user state user
-  | Update_user_status update -> print_user_status state update
-  | Update_user_chat_action update -> print_chat_action state update
+  | Update_user_status update -> handle_user_status state update
+  | Update_user_chat_action update -> handle_chat_action state update
+  | Update_chat_read_inbox update -> handle_chat_read_inbox_update state update
   | Update_file file ->
     let description = Display.File.Local.to_description_string (File.local file) in
     Cli.print ~style:[ `Green ] (sprintf "File: %s\n" description);

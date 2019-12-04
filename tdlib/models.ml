@@ -350,6 +350,14 @@ module Chat = struct
     end
   end
 
+  module Read_inbox = struct
+    type t =
+      { chat_id : Id.t
+      ; unread_count : int32
+      }
+    [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
+  end
+
   type t =
     { id : Id.t
     ; title : string
@@ -765,6 +773,7 @@ module Request = struct
     | Update_new_message of Message.t
     | Update_message_content of Message.Request.Update_content.t
     | Update_new_chat of Chat.t
+    | Update_chat_read_inbox of Chat.Read_inbox.t
     | Update_user of User.t
     | Update_user_status of User.Request.Update_status.t
     | Update_user_chat_action of Chat.Request.Update_action.t
@@ -814,6 +823,8 @@ module Request = struct
     | Update_message_content request ->
       create "updateMessageContent" (Message.Request.Update_content.yojson_of_t request)
     | Update_new_chat chat -> create' "updateNewChat" "chat" (Chat.yojson_of_t chat)
+    | Update_chat_read_inbox read_inbox ->
+      create "updateChatReadInbox" (Chat.Read_inbox.yojson_of_t read_inbox)
     | Update_user user -> create' "updateUser" "user" (User.yojson_of_t user)
     | Update_user_status status ->
       create "updateUserStatus" (User.Request.Update_status.yojson_of_t status)
@@ -853,6 +864,7 @@ module Request = struct
     | "updateMessageContent" ->
       Update_message_content (Message.Request.Update_content.t_of_yojson j)
     | "updateNewChat" -> Update_new_chat (Chat.t_of_yojson (member "chat" j))
+    | "updateChatReadInbox" -> Update_chat_read_inbox (Chat.Read_inbox.t_of_yojson j)
     | "updateUser" -> Update_user (User.t_of_yojson (member "user" j))
     | "updateUserStatus" -> Update_user_status (User.Request.Update_status.t_of_yojson j)
     | "updateUserChatAction" ->
