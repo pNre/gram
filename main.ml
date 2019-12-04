@@ -170,9 +170,10 @@ let start ~db_path ~debug =
   ignore (Client.execute (Models.Request.Set_log_verbosity_level Error));
   let client = Client.init () in
   let state = Mvar.create () in
+  let state' = Mvar.read_only state in
   Mvar.set state State.empty;
-  Cli.configure state;
-  Deferred.forever () (cli client state);
+  Cli.configure state';
+  Deferred.forever () (cli client state');
   Deferred.forever () (receive_and_dispatch ~db_path ~debug client state);
   Shutdown.at_shutdown (fun _ -> return (Client.deinit client));
   Deferred.never ()

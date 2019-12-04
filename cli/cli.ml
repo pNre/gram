@@ -3,20 +3,22 @@ open Core
 open Tdlib.Models
 
 module Completion = struct
-  let state = ref (Mvar.create ())
-  let index = ref 0
+  open Readline
+
+  let state : State.t Mvar.Read_only.t option ref = ref None
+  let index : int ref = ref 0
 
   let prepare_completion s =
     let result =
-      if Option.is_none (Readline.Completion_quote_character.get ())
+      if Option.is_none (Completion_quote_character.get ())
       then String.substr_replace_all s ~pattern:" " ~with_:"\\ "
       else s
     in
-    Readline.Completion_entry_function.completion_result_of_string result
+    Completion_entry_function.completion_result_of_string result
   ;;
 
   let completion_entry text completion_state =
-    let state = Mvar.peek_exn !state in
+    let state = Mvar.peek_exn (Option.value_exn !state) in
     let users = State.lookup_users state text in
     let chats = State.lookup_chats state text in
     let results = List.map users ~f:User.full_name @ List.map chats ~f:Chat.title in
@@ -27,12 +29,12 @@ module Completion = struct
     | Some result -> Some (prepare_completion result)
     | None ->
       Option.map
-        ~f:Readline.Completion_entry_function.completion_result_of_char_ptr
-        (Readline.filename_completion_function text completion_state)
+        ~f:Completion_entry_function.completion_result_of_char_ptr
+        (filename_completion_function text completion_state)
   ;;
 
   let attempted_completion text start _end =
-    if start = 0 then Some (Readline.completion_matches text completion_entry) else None
+    if start = 0 then Some (completion_matches text completion_entry) else None
   ;;
 
   let rec is_char_quoted text index =
@@ -43,7 +45,7 @@ module Completion = struct
 end
 
 let configure state' =
-  Completion.state := state';
+  Completion.state := Some state';
   Readline.Attempted_completion_function.set Completion.attempted_completion;
   Readline.Completion_entry_function.set Completion.completion_entry;
   Readline.Char_is_quoted.set Completion.is_char_quoted;
