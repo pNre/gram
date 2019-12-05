@@ -9,16 +9,14 @@ let db_key = Sys.getenv_exn "TG_DB_KEY"
 
 let request_chats state client chat_ids =
   let open Models in
-  if not (List.is_empty chat_ids)
-  then
-    chat_ids
-    |> List.last_exn
-    |> State.chat state
-    |> Option.iter ~f:(fun chat ->
-           let offset_chat_id = Chat.id chat in
-           let offset_order = Chat.order chat in
-           let request = Chat.Request.Get_chats.create ~offset_chat_id ~offset_order () in
-           Client.send client (Get_chats request))
+  chat_ids
+  |> List.last
+  |> Option.bind ~f:(State.chat state)
+  |> Option.iter ~f:(fun chat ->
+         let offset_chat_id = Chat.id chat in
+         let offset_order = Chat.order chat in
+         let request = Chat.Request.Get_chats.create ~offset_chat_id ~offset_order () in
+         Client.send client (Get_chats request))
 ;;
 
 let handle_message state ?(prefix = "") message =
