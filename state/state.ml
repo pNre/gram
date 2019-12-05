@@ -22,6 +22,7 @@ type t =
   ; chat_actions : Chat_actions.t
   ; unread_messages : Message.t list
   ; updated_message_ids : Int64.Set.t
+  ; mutations : (Request.t -> t -> [ `Return of t | `Apply of t | `Skip ]) list
   }
 
 let empty =
@@ -33,6 +34,7 @@ let empty =
   ; chat_actions = Chat_actions.empty
   ; unread_messages = []
   ; updated_message_ids = Message.Id.Set.empty
+  ; mutations = []
   }
 ;;
 
@@ -41,6 +43,18 @@ let create () =
   let var = create () in
   set var empty;
   var, read_only var
+
+(*Mutations*)
+let add_mutation state f = { state with mutations = state.mutations @ [ f ] }
+
+let run_mutations state request =
+  let mutations = state.mutations in
+  let state = { state with mutations = [] } in
+  List.fold mutations ~init:state ~f:(fun state mutation ->
+      match mutation request state with
+      | `Return state -> { state with mutations = state.mutations @ [ mutation ] }
+      | `Apply state -> state
+      | `Skip -> { state with mutations = state.mutations @ [ mutation ] })
 ;;
 
 (*Updated messages*)
