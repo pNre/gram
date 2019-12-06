@@ -36,6 +36,13 @@ let empty =
   }
 ;;
 
+let create () =
+  let open Async.Mvar in
+  let var = create () in
+  set var empty;
+  var, read_only var
+;;
+
 (*Updated messages*)
 let append_updated_message_id state id =
   { state with updated_message_ids = Message.Id.Set.add state.updated_message_ids id }
@@ -84,10 +91,10 @@ let lookup_users state q =
 let update_user_status state user new_status =
   let key = User.id user in
   match Users_status.find state.users_status key with
-  | Some status when status = new_status -> `Duplicate
+  | Some status when status = new_status -> None
   | Some _ | None ->
     let users_status = Users_status.set state.users_status ~key ~data:new_status in
-    `Ok { state with users_status }
+    Some { state with users_status }
 ;;
 
 (*Chats*)

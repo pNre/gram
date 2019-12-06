@@ -56,7 +56,7 @@ let configure state' =
 
 let parse client state exec () =
   let open Async in
-  let read () = Readline.readline_opt "$ " in
+  let read () = Readline.readline_opt "・" in
   let%bind cmd = In_thread.run read in
   match cmd with
   | Some cmd ->
@@ -66,25 +66,111 @@ let parse client state exec () =
   | None -> return ()
 ;;
 
-let color_of_key k =
-  let colors = [ `Red; `Green; `Yellow; `Magenta; `Cyan ] in
-  let index = k mod List.length colors in
-  List.nth_exn colors index
+module Color = struct
+  let colors =
+    [ 222, 57, 183
+    ; 82, 199, 43
+    ; 199, 65, 226
+    ; 79, 197, 84
+    ; 108, 91, 241
+    ; 165, 190, 48
+    ; 156, 82, 223
+    ; 134, 194, 81
+    ; 36, 90, 218
+    ; 213, 176, 63
+    ; 69, 119, 249
+    ; 94, 153, 47
+    ; 188, 93, 211
+    ; 57, 161, 78
+    ; 125, 111, 232
+    ; 143, 145, 39
+    ; 77, 88, 201
+    ; 64, 200, 135
+    ; 186, 74, 160
+    ; 55, 122, 43
+    ; 35, 95, 201
+    ; 222, 94, 41
+    ; 84, 126, 236
+    ; 201, 125, 44
+    ; 85, 145, 236
+    ; 214, 74, 139
+    ; 80, 115, 204
+    ; 227, 124, 212
+    ; 73, 94, 183
+    ; 176, 134, 234
+    ; 112, 99, 198
+    ; 144, 91, 184
+    ]
+  ;;
+
+  let gen_color key = List.nth_exn colors (key mod List.length colors)
+end
+
+module Style = struct
+  type attribute =
+    | Foreground of (int * int * int)
+    | Background of (int * int * int)
+    | Normal
+    | Bold
+    | Dim
+    | Underlined
+    | Reversed
+
+  let value_of_attribute = function
+    | Foreground (r, g, b) -> sprintf "38;2;%d;%d;%d" r g b
+    | Background (r, g, b) -> sprintf "48;2;%d;%d;%d" r g b
+    | Normal -> "0"
+    | Bold -> "1"
+    | Dim -> "2"
+    | Underlined -> "4"
+    | Reversed -> "7"
+  ;;
+
+  let set_custom attributes =
+    let formats = List.map attributes ~f:value_of_attribute in
+    "\027[" ^ String.concat formats ~sep:";" ^ "m"
+  ;;
+
+  let unset_custom = set_custom [ Normal ]
+  let with_format attributes str = set_custom attributes ^ str ^ unset_custom
+  let to_string (attributes, str) = with_format attributes str
+  let to_string_set attributes = set_custom attributes
+  let to_string_unset _ = unset_custom
+
+  module Common = struct
+    let secondary = [ Dim; Foreground (192, 192, 192) ]
+    let tertiary = [ Dim; Foreground (128, 128, 128) ]
+    let error = [ Foreground (214, 53, 64) ]
+    let success = [ Foreground (91, 158, 55) ]
+  end
+
+  (* Colors *)
+  let error = with_format Common.error
+  let success = with_format Common.success
+  let prominent = with_format [ Bold; Foreground (255, 255, 255) ]
+  let secondary = with_format Common.secondary
+end
+
+let printf' f fmt =
+  Core.Printf.ksprintf
+    (fun s ->
+      let open Readline in
+      let point = Point.get () in
+      let text = copy_text 0 (End.get ()) in
+      save_prompt ();
+      ignore (replace_line "" 0);
+      ignore (redisplay ());
+      print_string (f s);
+      Out_channel.flush stdout;
+      restore_prompt ();
+      ignore (replace_line text 0);
+      Point.set point;
+      ignore (redisplay ()))
+    fmt
 ;;
 
-let print ?(style = []) ?(key = None) s =
-  let open Readline in
-  let point = Point.get () in
-  let text = copy_text 0 (End.get ()) in
-  save_prompt ();
-  ignore (replace_line "" 0);
-  ignore (redisplay ());
-  let style =
-    Option.value_map ~default:style ~f:(fun key -> color_of_key key :: style) key
-  in
-  Console.Ansi.printf style "%s" s;
-  restore_prompt ();
-  ignore (replace_line text 0);
-  Point.set point;
-  ignore (redisplay ())
+let printf fmt = printf' Fn.id fmt
+
+let tprintf style fmt =
+  printf' (fun s -> Style.set_custom style ^ s ^ Style.unset_custom) fmt
 ;;

@@ -1,5 +1,6 @@
 open Async
 open Core
+open Cli
 open Tdlib
 open Tdlib.Models
 
@@ -8,46 +9,43 @@ let api_hash = Sys.getenv_exn "TG_API_HASH"
 let db_key = Sys.getenv_exn "TG_DB_KEY"
 
 let request_chats state client chat_ids =
+  let open Option.Let_syntax in
   let open Models in
-  chat_ids
-  |> List.last
-  |> Option.bind ~f:(State.chat state)
-  |> Option.iter ~f:(fun chat ->
-         let offset_chat_id = Chat.id chat in
-         let offset_order = Chat.order chat in
-         let request = Chat.Request.Get_chats.create ~offset_chat_id ~offset_order () in
-         Client.send client (Get_chats request))
+  let request =
+    let%bind chat_id = List.last chat_ids in
+    let%map chat = State.chat state chat_id in
+    let offset_chat_id = Chat.id chat in
+    let offset_order = Chat.order chat in
+    Request.Get_chats (Chat.Request.Get_chats.create ~offset_chat_id ~offset_order ())
+  in
+  Option.iter request ~f:(Client.send client)
 ;;
 
 let handle_message state ?(prefix = "") message =
   let content = Message.content message in
   let sender_user_id = Message.sender_user_id message in
-  let key = Some (Int32.hash sender_user_id) in
+  let sender_user_id_hash = User.Id.hash sender_user_id in
+  let sender_style = [ Style.Foreground (Cli.Color.gen_color sender_user_id_hash) ] in
   let chat = State.chat state (Message.chat_id message) in
   let user = State.user state sender_user_id in
-  let description = Display.Message.to_description_string chat user content in
-  Option.iter description ~f:(fun description ->
-      Cli.print ~style:[ `Bright ] ~key (sprintf "%s%s\n" prefix description))
+  let description = Display.Message.description chat user content in
+  Option.iter description ~f:(fun (title, content) ->
+      printf !"%s%s: %s\n" prefix (Style.with_format sender_style title) content)
 ;;
 
 let handle_user_status state update =
   let open User.Request in
   let user_id = Update_status.user_id update in
   let status = Update_status.status update in
-  let user = State.user state user_id in
-  let description = Display.User.Status.to_description_string status in
-  let result =
-    Option.map user ~f:(fun user -> State.update_user_status state user status)
+  let new_state =
+    let open Option.Let_syntax in
+    let%bind user = State.user state user_id
+    and description = Display.User.Status.to_description_string status in
+    let%map result = State.update_user_status state user status in
+    tprintf Style.Common.secondary !"%{User.full_name}: %s\n" user description;
+    result
   in
-  match result with
-  | Some (`Ok state) ->
-    Option.both user description
-    |> Option.iter ~f:(fun (user, description) ->
-           Cli.print
-             ~style:[ `Dim; `Yellow ]
-             (sprintf "%s: %s\n" (User.full_name user) description));
-    state
-  | _ -> state
+  Option.value new_state ~default:state
 ;;
 
 let handle_chat_action state update =
@@ -61,8 +59,7 @@ let handle_chat_action state update =
   result
   |> Option.map ~f:fst
   |> Option.bind ~f:Display.Chat.Action.to_description_string
-  |> Option.iter ~f:(fun op ->
-         Cli.print ~style:[ `Dim; `Yellow ] (sprintf "%s: %s\n" prefix op));
+  |> Option.iter ~f:(fun op -> tprintf Style.Common.secondary "%s: %s\n" prefix op);
   state
 ;;
 
@@ -73,21 +70,20 @@ let handle_chat_read_inbox_update state update =
     |> Chat.Read_inbox.chat_id
     |> State.chat state
     |> Option.map ~f:Chat.title
-    |> Option.iter ~f:(fun chat_title ->
-           Cli.print ~style:[ `Dim; `Magenta ] (sprintf "%s marked as read\n" chat_title));
+    |> Option.iter ~f:(tprintf Style.Common.secondary "%s marked as read\n");
   state
 ;;
 
-let dispatch ~db_path state client = function
+let dispatch dbpath state client = function
   | Request.Update_authorization_state Wait_tdlib_parameters ->
-    let db_path =
-      match db_path with
+    let database_directory =
+      match dbpath with
       | Some path -> path
       | None -> Sys.getenv_exn "HOME" ^ "/.config/db"
     in
     let parameters =
       Tdlib.Parameters.create
-        ~database_directory:db_path
+        ~database_directory
         ~api_id
         ~api_hash
         ~use_message_database:true
@@ -140,67 +136,68 @@ let dispatch ~db_path state client = function
   | Update_user_chat_action update -> handle_chat_action state update
   | Update_chat_read_inbox update -> handle_chat_read_inbox_update state update
   | Update_file file ->
-    let description = Display.File.Local.to_description_string (File.local file) in
-    Cli.print ~style:[ `Green ] (sprintf "File: %s\n" description);
+    let local_file = File.local file in
+    tprintf
+      Style.Common.secondary
+      !"File: %{Style#set}%{Display.File.Local}\n"
+      Style.Common.success
+      local_file;
     state
   | _ -> state
 ;;
 
 let log_if_debug ~debug request =
   if debug
-  then (
-    let s = Yojson.Safe.to_string (Models.Request.yojson_of_t request) in
-    Cli.print ~style:[ `Dim ] (s ^ "\n"))
+  then
+    request
+    |> Models.Request.yojson_of_t
+    |> Yojson.Safe.to_string
+    |> tprintf Style.Common.tertiary "%s\n"
 ;;
 
 let cli client state () =
   State.when_ready (Mvar.peek_exn state) >>= Cli.parse client state Cmds.exec
 ;;
 
-let receive_and_dispatch ~db_path ~debug client state () =
-  Client.receive client
-  >>= (fun msg ->
-        let state = Mvar.peek_exn state in
-        let result =
-          match msg with
-          | None -> state
-          | Some (Ok request) ->
-            log_if_debug ~debug request;
-            dispatch ~db_path state client request
-          | Some (Error err) ->
-            Cli.print (sprintf "Error parsing message: %s\n" (Exn.to_string err));
-            state
-        in
-        return result)
-  >>| Mvar.set state
+let receive dbpath debug client state () =
+  let%map msg = Client.receive client in
+  let state' = Mvar.peek_exn state in
+  let state' =
+    match msg with
+    | None -> state'
+    | Some (Ok request) ->
+      log_if_debug ~debug request;
+      dispatch dbpath state' client request
+    | Some (Error err) ->
+      printf !"Error parsing message: %{Style.error}\n" (Exn.to_string err);
+      state'
+  in
+  Mvar.set state state'
 ;;
 
-let start ~db_path ~debug =
+let start dbpath debug =
   ignore (Client.execute (Models.Request.Set_log_verbosity_level Error));
   let client = Client.init () in
-  let state = Mvar.create () in
-  let state' = Mvar.read_only state in
-  Mvar.set state State.empty;
-  Cli.configure state';
-  Deferred.forever () (cli client state');
-  Deferred.forever () (receive_and_dispatch ~db_path ~debug client state);
+  let state, state_ro = State.create () in
+  Cli.configure state_ro;
+  Deferred.forever () (cli client state_ro);
+  Deferred.forever () (receive dbpath debug client state);
   Shutdown.at_shutdown (fun _ -> return (Client.deinit client));
   Deferred.never ()
 ;;
 
 let () =
-  let command =
-    Async.Command.async
-      ~summary:""
-      Command.Let_syntax.(
-        [%map_open
-          let db_path =
-            flag
-              "database"
-              (optional string)
-              ~doc:"path Database folder path, defaults to ~/.config/gram"
-          and debug = flag "debug" (optional bool) ~doc:"true|false Debug mode enabled" in
-          fun () -> start ~db_path ~debug:(Option.value ~default:false debug)])
-  in
-  Command.run command
+  let open Async.Command in
+  let open Command.Let_syntax in
+  async
+    ~summary:""
+    [%map_open
+      let dbpath =
+        flag
+          "database"
+          (optional string)
+          ~doc:"path Database folder path, defaults to ~/.config/gram"
+      and debug = flag "debug" (optional bool) ~doc:"true|false Debug mode enabled" in
+      fun () -> start dbpath (Option.value ~default:false debug)]
+  |> Command.run
 ;;

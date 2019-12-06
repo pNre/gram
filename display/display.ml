@@ -55,10 +55,10 @@ module Message = struct
     | Other _ -> None
   ;;
 
-  let to_description_string chat user content =
+  let description chat user content =
     let title = Update.prefix chat user in
     let content = display_content content in
-    Option.map content ~f:(fun content -> sprintf "%s: %s\n" title content)
+    Option.map content ~f:(fun content -> title, content)
   ;;
 end
 
@@ -114,7 +114,7 @@ module File = struct
       String.Escaping.escape ~escapeworthy:[ ' ' ] ~escape_char:'\\' |> Staged.unstage
     ;;
 
-    let to_description_string file =
+    let to_string file =
       [ (let path = escape (path file) in
          if String.length path > 0 then Some (path ^ " ->") else None)
       ; (if is_downloading_active file

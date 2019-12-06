@@ -2,4 +2,4 @@
  (name main)
  (libraries tdlib cmds state core async readline cli display) 
  (preprocess
-  (pps ppx_let)))
+  (pps ppx_let ppx_custom_printf)))
