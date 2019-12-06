@@ -9,15 +9,15 @@ module Update = struct
     else (
       let user_name = Option.map user ~f:User.full_name in
       let chat_title = Option.map chat ~f:Chat.title in
-      [ user_name; chat_title ] |> List.filter_opt |> String.concat ~sep:" @ ")
+      [ user_name; chat_title ] |> List.filter_opt |> String.concat ~sep:" -> ")
   ;;
 end
 
 module Message = struct
-  open Message.Content
+  open Message
 
   let display_content_of_photo photo_content =
-    let open Photo in
+    let open Content.Photo in
     let file = Option.value_exn (best_file photo_content) in
     let local_file_path = file |> File.local |> File.Local.path in
     let info =
@@ -30,12 +30,28 @@ module Message = struct
     else sprintf "[Photo %ld] <%s>" (File.id file) info
   ;;
 
-  let display_content = function
+  let display_content_of_animation animation_content =
+    let caption = animation_content |> Content.Animation.caption |> Formatted_text.text in
+    let file = animation_content |> Content.Animation.animation |> Animation.animation in
+    let local_file_path = file |> File.local |> File.Local.path in
+    let info =
+      [ caption; local_file_path ]
+      |> List.filter ~f:(Fun.negate String.is_empty)
+      |> String.concat ~sep:" -> "
+    in
+    if String.is_empty info
+    then sprintf "[Animation %ld]" (File.id file)
+    else sprintf "[Animation %ld] <%s>" (File.id file) info
+  ;;
+
+  let display_content content =
+    let open Content in
+    match content with
     | Message_text text -> Some (Formatted_text.text (Text.text text))
     | Message_photo photo when not (List.is_empty photo.photo.sizes) ->
       Some (display_content_of_photo photo)
     | Message_photo _ -> None
-    | Message_animation _ -> Some "[Animation]"
+    | Message_animation animation -> Some (display_content_of_animation animation)
     | Other _ -> None
   ;;
 

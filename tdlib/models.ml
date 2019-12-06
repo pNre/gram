@@ -457,7 +457,7 @@ module Animation = struct
     ; mime_type : string
     ; animation : File.t
     }
-  [@@deriving yojson] [@@yojson.allow_extra_fields]
+  [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
 end
 
 module Formatted_text = struct
@@ -486,7 +486,7 @@ module Message = struct
         ; caption : Formatted_text.t
         ; animation : Animation.t
         }
-      [@@deriving yojson] [@@yojson.allow_extra_fields]
+      [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
     end
 
     module Photo = struct
