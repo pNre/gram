@@ -70,7 +70,7 @@ let handle_chat_read_inbox_update state update =
     |> Chat.Read_inbox.chat_id
     |> State.chat state
     |> Option.map ~f:Chat.title
-    |> Option.iter ~f:(tprintf Style.Common.secondary "%s marked as read\n");
+    |> Option.iter ~f:(tprintf Style.Common.tertiary "%s marked as read\n");
   state
 ;;
 
@@ -146,28 +146,22 @@ let dispatch dbpath state client = function
   | _ -> state
 ;;
 
-let log_if_debug ~debug request =
-  if debug
-  then
-    request
-    |> Models.Request.yojson_of_t
-    |> Yojson.Safe.to_string
-    |> tprintf Style.Common.tertiary "%s\n"
+let debug_log = function
+  | `Sent -> tprintf Style.Common.tertiary "→ %s\n"
+  | `Received -> tprintf Style.Common.tertiary "← %s\n"
 ;;
 
 let cli client state () =
   State.when_ready (Mvar.peek_exn state) >>= Cli.parse client state Cmds.exec
 ;;
 
-let receive dbpath debug client state () =
+let receive dbpath client state () =
   let%map msg = Client.receive client in
   let state' = Mvar.peek_exn state in
   let state' =
     match msg with
     | None -> state'
-    | Some (Ok request) ->
-      log_if_debug ~debug request;
-      dispatch dbpath state' client request
+    | Some (Ok request) -> dispatch dbpath state' client request
     | Some (Error err) ->
       printf !"Error parsing message: %{Style.error}\n" (Exn.to_string err);
       state'
@@ -177,11 +171,12 @@ let receive dbpath debug client state () =
 
 let start dbpath debug =
   ignore (Client.execute (Models.Request.Set_log_verbosity_level Error));
-  let client = Client.init () in
+  let debug = if debug then debug_log else fun _ _ -> () in
+  let client = Client.init ~debug () in
   let state, state_ro = State.create () in
   Cli.configure state_ro;
   Deferred.forever () (cli client state_ro);
-  Deferred.forever () (receive dbpath debug client state);
+  Deferred.forever () (receive dbpath client state);
   Shutdown.at_shutdown (fun _ -> return (Client.deinit client));
   Deferred.never ()
 ;;
