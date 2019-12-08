@@ -3,13 +3,9 @@ open Tdlib.Models
 
 module Update = struct
   let prefix chat user =
-    let chat_user_id = Option.bind chat ~f:Chat.user_id in
-    if chat_user_id = Option.map user ~f:User.id
-    then Chat.title (Option.value_exn chat)
-    else (
-      let user_name = Option.map user ~f:User.full_name in
-      let chat_title = Option.map chat ~f:Chat.title in
-      [ user_name; chat_title ] |> List.filter_opt |> String.concat ~sep:" -> ")
+    if Chat.is_user_id chat (User.id user)
+    then Chat.title chat
+    else [ User.full_name user; Chat.title chat ] |> String.concat ~sep:" -> "
   ;;
 end
 
@@ -47,18 +43,12 @@ module Message = struct
   let display_content content =
     let open Content in
     match content with
-    | Message_text text -> Some (Formatted_text.text (Text.text text))
+    | Message_text text -> Formatted_text.text (Text.text text)
     | Message_photo photo when not (List.is_empty photo.photo.sizes) ->
-      Some (display_content_of_photo photo)
-    | Message_photo _ -> None
-    | Message_animation animation -> Some (display_content_of_animation animation)
-    | Other _ -> None
-  ;;
-
-  let description chat user content =
-    let title = Update.prefix chat user in
-    let content = display_content content in
-    Option.map content ~f:(fun content -> title, content)
+      display_content_of_photo photo
+    | Message_photo _ -> "[Empty photo]"
+    | Message_animation animation -> display_content_of_animation animation
+    | Other _ -> "[Unsupported]"
   ;;
 end
 

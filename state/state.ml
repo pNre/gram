@@ -1,4 +1,5 @@
 open Core
+open Core.Poly
 open Tdlib.Models
 
 module Map (K : Map.S) (V : T) = struct
@@ -7,11 +8,16 @@ module Map (K : Map.S) (V : T) = struct
   type t = (Key.t, V.t, Key.comparator_witness) Map.t
 end
 
+module Message_id_list = struct
+  type t = Message.Id.t list
+end
+
 module Users = Map (User.Id.Map) (User)
 module Users_status = Map (User.Id.Map) (User.Status)
 module Chats = Map (Chat.Id.Map) (Chat)
-module Chat_action_key = Tuple.Comparable (User.Id) (Chat.Id)
-module Chat_actions = Map (Chat_action_key.Map) (Chat.Action)
+module User_id_chat_id = Tuple.Comparable (User.Id) (Chat.Id)
+module Unread_messages = Map (Chat.Id.Map) (Message_id_list)
+module Chat_actions = Map (User_id_chat_id.Map) (Chat.Action)
 
 type t =
   { is_ready : unit Async.Ivar.t
@@ -20,8 +26,8 @@ type t =
   ; chats : Chats.t
   ; chat_ids : int64 list
   ; chat_actions : Chat_actions.t
-  ; unread_messages : Message.t list
-  ; updated_message_ids : Int64.Set.t
+  ; unread_message_ids : Unread_messages.t
+  ; updated_message_ids : Message.Id.Set.t
   ; mutations : (Request.t -> t -> [ `Return of t | `Apply of t | `Skip ]) list
   }
 
@@ -32,7 +38,7 @@ let empty =
   ; chats = Chats.empty
   ; chat_ids = []
   ; chat_actions = Chat_actions.empty
-  ; unread_messages = []
+  ; unread_message_ids = Unread_messages.empty
   ; updated_message_ids = Message.Id.Set.empty
   ; mutations = []
   }
@@ -42,7 +48,8 @@ let create () =
   let open Async.Mvar in
   let var = create () in
   set var empty;
-  var, read_only var
+  var
+;;
 
 (*Mutations*)
 let add_mutation state f = { state with mutations = state.mutations @ [ f ] }
@@ -71,11 +78,27 @@ let is_message_id_updated { updated_message_ids; _ } =
 ;;
 
 (*Updated messages*)
-let append_unread_message state message =
-  { state with unread_messages = message :: state.unread_messages }
+let append_unread_message_id state chat_id message_id =
+  { state with
+    unread_message_ids =
+      Unread_messages.update
+        state.unread_message_ids
+        chat_id
+        ~f:
+          (Option.value_map ~default:[ message_id ] ~f:(fun messages ->
+               message_id :: messages))
+  }
 ;;
 
-let set_unread_messages state unread_messages = { state with unread_messages }
+let remove_unread_message_ids state chat_id =
+  { state with
+    unread_message_ids = Unread_messages.remove state.unread_message_ids chat_id
+  }
+;;
+
+let unread_message_ids { unread_message_ids; _ } chat_id =
+  chat_id |> Unread_messages.find unread_message_ids |> Option.value ~default:[]
+;;
 
 (*Events*)
 let when_ready { is_ready; _ } = Async.Ivar.read is_ready

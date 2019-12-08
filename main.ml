@@ -22,15 +22,20 @@ let request_chats state client chat_ids =
 ;;
 
 let handle_message state ?(prefix = "") message =
-  let content = Message.content message in
+  let content = message |> Message.content |> Display.Message.display_content in
   let sender_user_id = Message.sender_user_id message in
   let sender_user_id_hash = User.Id.hash sender_user_id in
-  let sender_style = [ Style.Foreground (Cli.Color.gen_color sender_user_id_hash) ] in
+  let sender_style = [ Style.Foreground (Color.gen_color sender_user_id_hash) ] in
   let chat = State.chat state (Message.chat_id message) in
   let user = State.user state sender_user_id in
-  let description = Display.Message.description chat user content in
-  Option.iter description ~f:(fun (title, content) ->
-      printf !"%s%s: %s\n" prefix (Style.with_format sender_style title) content)
+  let title =
+    match chat, user with
+    | Some chat, Some user -> Display.Update.prefix chat user
+    | Some chat, None -> Chat.title chat
+    | None, Some user -> User.full_name user
+    | None, None -> User.Id.to_string sender_user_id
+  in
+  printf [] "%s%s%s\n" prefix (Style.with_format sender_style title ^ ": ") content
 ;;
 
 let handle_user_status state update =
@@ -42,7 +47,7 @@ let handle_user_status state update =
     let%bind user = State.user state user_id
     and description = Display.User.Status.to_description_string status in
     let%map result = State.update_user_status state user status in
-    tprintf Style.Common.secondary !"%{User.full_name}: %s\n" user description;
+    printf Style.secondary "%s: %s\n" (User.full_name user) description;
     result
   in
   Option.value new_state ~default:state
@@ -51,27 +56,17 @@ let handle_user_status state update =
 let handle_chat_action state update =
   let open Chat.Request in
   let action = Update_action.action update in
-  let chat = update |> Update_action.chat_id |> State.chat state in
-  let user = update |> Update_action.user_id |> State.user state in
-  let prefix = Display.Update.prefix chat user in
-  let result = Option.map2 user chat ~f:(State.update_chat_action state action) in
-  let state = Option.value_map result ~default:state ~f:snd in
-  result
-  |> Option.map ~f:fst
-  |> Option.bind ~f:Display.Chat.Action.to_description_string
-  |> Option.iter ~f:(fun op -> tprintf Style.Common.secondary "%s: %s\n" prefix op);
-  state
-;;
-
-let handle_chat_read_inbox_update state update =
-  if Chat.Read_inbox.unread_count update = 0l
-  then
-    update
-    |> Chat.Read_inbox.chat_id
-    |> State.chat state
-    |> Option.map ~f:Chat.title
-    |> Option.iter ~f:(tprintf Style.Common.tertiary "%s marked as read\n");
-  state
+  let new_state =
+    let open Option.Let_syntax in
+    let%bind chat = update |> Update_action.chat_id |> State.chat state
+    and user = update |> Update_action.user_id |> State.user state in
+    let prefix = Display.Update.prefix chat user in
+    let result, state = State.update_chat_action state action user chat in
+    let%map description = Display.Chat.Action.to_description_string result in
+    printf Style.secondary "%s: %s\n" prefix description;
+    state
+  in
+  Option.value new_state ~default:state
 ;;
 
 let dispatch dbpath state client = function
@@ -122,7 +117,7 @@ let dispatch dbpath state client = function
     State.remove_updated_message_id state (Message.id message)
   | Update_new_message message ->
     handle_message state message;
-    State.append_unread_message state message
+    State.append_unread_message_id state (Message.chat_id message) (Message.id message)
   | Update_message_content request ->
     let open Message.Request in
     let chat_id = Update_content.chat_id request in
@@ -134,48 +129,47 @@ let dispatch dbpath state client = function
   | Update_user user -> State.set_user state user
   | Update_user_status update -> handle_user_status state update
   | Update_user_chat_action update -> handle_chat_action state update
-  | Update_chat_read_inbox update -> handle_chat_read_inbox_update state update
   | Update_file file ->
     let local_file = File.local file in
-    tprintf
-      Style.Common.secondary
-      !"File: %{Style#set}%{Display.File.Local}\n"
-      Style.Common.success
-      local_file;
+    printf
+      Style.secondary
+      !"File: %{Style#success}\n"
+      (Display.File.Local.to_string local_file);
     state
   | _ -> state
 ;;
 
 let debug_log = function
-  | `Sent -> tprintf Style.Common.tertiary "→ %s\n"
-  | `Received -> tprintf Style.Common.tertiary "← %s\n"
+  | `Sent -> printf Style.tertiary "→ %s\n"
+  | `Received -> printf Style.tertiary "← %s\n"
 ;;
 
 let cli client state () =
-  State.when_ready (Mvar.peek_exn state) >>= Cli.parse client state Cmds.exec
+  let%bind _ = State.when_ready (Mvar.peek_exn state) in
+  Cli.parse (fun cmd ->
+      Mvar.update_exn state ~f:(fun state -> Cmds.exec client state cmd))
 ;;
 
 let receive dbpath client state () =
   let%map msg = Client.receive client in
-  let state' = Mvar.peek_exn state in
-  let state' =
-    match msg with
-    | None -> state'
-    | Some (Ok request) -> dispatch dbpath state' client request
-    | Some (Error err) ->
-      printf !"Error parsing message: %{Style.error}\n" (Exn.to_string err);
-      state'
-  in
-  Mvar.set state state'
+  Mvar.update_exn state ~f:(fun state ->
+      match msg with
+      | Some (Ok req) ->
+        let state = dispatch dbpath state client req.typ in
+        State.run_mutations state req
+      | Some (Error err) ->
+        printf [] !"Error parsing message: %{Style#error}\n" (Exn.to_string err);
+        state
+      | None -> state)
 ;;
 
 let start dbpath debug =
   ignore (Client.execute (Models.Request.Set_log_verbosity_level Error));
   let debug = if debug then debug_log else fun _ _ -> () in
   let client = Client.init ~debug () in
-  let state, state_ro = State.create () in
-  Cli.configure state_ro;
-  Deferred.forever () (cli client state_ro);
+  let state = State.create () in
+  Cli.configure state;
+  Deferred.forever () (cli client state);
   Deferred.forever () (receive dbpath client state);
   Shutdown.at_shutdown (fun _ -> return (Client.deinit client));
   Deferred.never ()
