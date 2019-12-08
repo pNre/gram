@@ -1,7 +1,8 @@
-open Async
 open Core
-open Console.Ansi
+open Core.Poly
+open Cli
 open Tdlib
+open Tdlib.Models
 
 module Parser = struct
   open Angstrom
@@ -45,7 +46,7 @@ module Command = struct
     [@@deriving fields]
 
     let description ~sep arg =
-      [ Some (string_with_attr [ `Bright ] (name arg)); summary arg ]
+      [ Some (sprintf [ Bold ] "%s" (name arg)); summary arg ]
       |> List.filter_opt
       |> String.concat ~sep
     ;;
@@ -55,7 +56,7 @@ module Command = struct
     { name : string
     ; shape : Arg.t list
     ; summary : string
-    ; handler : Client.t -> State.t -> string list -> unit Deferred.t
+    ; handler : Client.t -> State.t -> string list -> State.t
     }
   [@@deriving fields]
 
@@ -65,8 +66,9 @@ module Command = struct
 
   let description command =
     sprintf
-      "\t%s\n\t    %s\n\t    - %s\n\n"
-      (string_with_attr [ `Bright ] (name command))
+      []
+      !"\t%{Style#prominent}\n\t    %s\n\t    - %s\n\n"
+      (name command)
       (summary command)
       (shape command
       |> List.map ~f:(Arg.description ~sep:":\n\t      ")
@@ -81,16 +83,14 @@ let message client state args =
     Option.iter chat ~f:(fun chat ->
         let open Models.Message.Content in
         let chat_id = Models.Chat.id chat in
-        let input_message_content =
-          Input.Input_message_text
-            (Input.Text.create (Models.Formatted_text.create ~text:message))
-        in
+        let input_message_content = Input.create_text message in
         let req = Models.Message.Request.Send.create chat_id input_message_content in
-        Client.send client (Send_message req))
+        Client.send client (Send_message req));
+    state
   in
   match args with
-  | recipient :: args -> return (send_message recipient (String.concat ~sep:" " args))
-  | _ -> return ()
+  | recipient :: args -> send_message recipient (String.concat ~sep:" " args)
+  | _ -> state
 ;;
 
 (*Sends a photo*)
@@ -100,62 +100,63 @@ let photo client state args =
     Option.iter chat ~f:(fun chat ->
         let open Models.Message.Content in
         let chat_id = Models.Chat.id chat in
-        let input_message_content =
-          Input.Input_message_photo
-            (Input.Photo.create
-               (Models.Formatted_text.create ~text:caption)
-               (Input.File.Local path))
-        in
+        let input_message_content = Input.create_photo caption path in
         let req = Models.Message.Request.Send.create chat_id input_message_content in
-        Client.send client (Send_message req))
+        Client.send client (Send_message req));
+    state
   in
   match args with
-  | recipient :: caption :: path :: _ -> return (send_photo recipient caption path)
-  | _ -> return ()
+  | recipient :: caption :: path :: _ -> send_photo recipient caption path
+  | _ -> state
 ;;
 
 (* Marks a chat as read *)
 let read client state args =
-  let q = String.concat ~sep:" " args in
-  let chat = State.find_chat state q in
-  return
-    (Option.iter chat ~f:(fun chat ->
-         let message_ids = List.map state.unread_messages ~f:Models.Message.id in
-         let req =
-           Models.Message.Request.View.create
-             ~chat_id:(Models.Chat.id chat)
-             ~message_ids
-             ~force_read:true
-         in
-         Client.send client (View_messages req)))
+  args
+  |> String.concat ~sep:" "
+  |> State.find_chat state
+  |> function
+  | Some chat ->
+    let open Models in
+    let chat_id = Chat.id chat in
+    let message_ids = State.unread_message_ids state chat_id in
+    let req = Message.Request.View.create ~chat_id ~message_ids ~force_read:true in
+    let request_uuid = Client.send' client (View_messages req) in
+    State.add_mutation state (fun req state ->
+        match req with
+        | { uuid = Some uuid; typ = Ok } when uuid = request_uuid ->
+          rprintf Style.tertiary !"%{Chat.title} marked as read\n" chat;
+          `Apply (State.remove_unread_message_ids state chat_id)
+        | _ -> `Skip)
+  | None -> state
 ;;
 
 (* Downloads a file *)
-let file_download client _state args =
-  return
-    (args
-    |> List.hd
-    |> Option.map ~f:Int32.of_string
-    |> Option.iter ~f:(fun file_id ->
-           let req =
-             Models.File.Request.Download.create
-               ~file_id
-               ~priority:1l
-               ~offset:0l
-               ~limit:0l
-               ~synchronous:true
-           in
-           Client.send client (Models.Request.Download_file req)))
+let file_download client state args =
+  let req =
+    let open Option.Let_syntax in
+    let%map id = List.hd args in
+    let file_id = Int32.of_string id in
+    Request.Download_file
+      (File.Request.Download.create
+         ~file_id
+         ~priority:1l
+         ~offset:0l
+         ~limit:0l
+         ~synchronous:true)
+  in
+  Option.iter req ~f:(Client.send client);
+  state
 ;;
 
 (* Stops downloading a file *)
-let file_download_cancel client _state args =
-  return
-    (args
-    |> List.hd
-    |> Option.map ~f:Int32.of_string
-    |> Option.iter ~f:(fun file_id ->
-           Client.send client (Models.Request.Cancel_download_file file_id)))
+let file_download_cancel client state args =
+  args
+  |> List.hd
+  |> Option.map ~f:Int32.of_string
+  |> Option.iter ~f:(fun file_id ->
+         Client.send client (Models.Request.Cancel_download_file file_id));
+  state
 ;;
 
 (* Commands *)
@@ -205,8 +206,8 @@ let fallback cmd =
     |> String.Table.data
     |> List.sort ~compare:(fun a b -> String.compare (Command.name a) (Command.name b))
     |> List.map ~f:Command.description
-    |> List.iter ~f:(printf [] "%s")
-  else printf [] "Unknown command: %s\n" (string_with_attr [ `Bright ] cmd)
+    |> List.iter ~f:(rprintf [] "%s")
+  else rprintf [] !"Unknown command: %{Style#prominent}\n" cmd
 ;;
 
 (* Entry point *)
@@ -214,10 +215,12 @@ let exec client state cmd =
   match Parser.parse cmd with
   | Ok (command :: args) when String.Table.mem commands command ->
     let command = String.Table.find_exn commands command in
-    command.handler client state args
-  | Ok [] -> return ()
-  | Ok (command :: _) -> return (fallback command)
+    (command.handler client state args)
+  | Ok [] -> state
+  | Ok (command :: _) ->
+    fallback command;
+    state
   | Error error ->
-    printf [] "%s\n" error;
-    return ()
+    rprintf [] "%s\n" error;
+    state
 ;;

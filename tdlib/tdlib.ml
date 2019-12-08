@@ -23,8 +23,8 @@ module Client = struct
     Result.try_with (fun _ -> t_of_yojson (Yojson.Safe.from_string s))
   ;;
 
-  let execute ?(client = None) req =
-    let serialized = req |> yojson_of_t |> Yojson.Safe.to_string in
+  let execute ?(client = None) typ =
+    let serialized = { uuid = None; typ } |> yojson_of_t |> Yojson.Safe.to_string in
     let response =
       td_json_client_execute
         (Option.map client ~f:(fun { client; _ } -> client))
@@ -33,11 +33,9 @@ module Client = struct
     Option.map ~f:request_of_string response
   ;;
 
-  let send' { client; debug; _ } req =
+  let send' { client; debug; _ } typ =
     let uuid = Uuid.to_string (Uuid_unix.create ()) in
-    let extra = `Assoc [ "@extra", `String uuid ] in
-    let req = yojson_of_t req in
-    let json = Yojson.Safe.Util.combine extra req in
+    let json = yojson_of_t { uuid = Some uuid; typ } in
     let serialized = Yojson.Safe.to_string json in
     debug `Sent serialized;
     td_json_client_send client serialized;

@@ -5,7 +5,7 @@ open Tdlib.Models
 module Completion = struct
   open Readline
 
-  let state : State.t Mvar.Read_only.t option ref = ref None
+  let state : State.t Mvar.Read_write.t option ref = ref None
   let index : int ref = ref 0
 
   let prepare_completion s =
@@ -40,7 +40,7 @@ module Completion = struct
   let rec is_char_quoted text index =
     match index with
     | 0 -> false
-    | i -> text.[i - 1] = '\\' && not (is_char_quoted text (index - 1))
+    | i -> Char.equal text.[i - 1] '\\' && not (is_char_quoted text (index - 1))
   ;;
 end
 
@@ -54,16 +54,15 @@ let configure state' =
   Readline.Filename_quote_characters.set (Some " ")
 ;;
 
-let parse client state exec () =
+let parse exec =
   let open Async in
   let read () = Readline.readline_opt "・" in
-  let%bind cmd = In_thread.run read in
+  let%map cmd = In_thread.run read in
   match cmd with
   | Some cmd ->
     Readline.add_history cmd;
-    let state = Mvar.peek_exn state in
-    exec client state cmd
-  | None -> return ()
+    exec cmd
+  | None -> ()
 ;;
 
 module Color = struct
@@ -133,26 +132,18 @@ module Style = struct
 
   let unset_custom = set_custom [ Normal ]
   let with_format attributes str = set_custom attributes ^ str ^ unset_custom
-  let to_string (attributes, str) = with_format attributes str
-  let to_string_set attributes = set_custom attributes
-  let to_string_unset _ = unset_custom
-
-  module Common = struct
-    let secondary = [ Dim; Foreground (192, 192, 192) ]
-    let tertiary = [ Dim; Foreground (128, 128, 128) ]
-    let error = [ Foreground (214, 53, 64) ]
-    let success = [ Foreground (91, 158, 55) ]
-  end
-
-  (* Colors *)
-  let error = with_format Common.error
-  let success = with_format Common.success
-  let prominent = with_format [ Bold; Foreground (255, 255, 255) ]
-  let secondary = with_format Common.secondary
+  let secondary = [ Dim; Foreground (192, 192, 192) ]
+  let tertiary = [ Dim; Foreground (128, 128, 128) ]
+  let error = [ Foreground (214, 53, 64) ]
+  let success = [ Foreground (91, 158, 55) ]
+  let prominent = [ Bold; Foreground (255, 255, 255) ]
+  let to_string_prominent = with_format prominent
+  let to_string_success = with_format success
+  let to_string_error = with_format error
 end
 
-let printf' f fmt =
-  Core.Printf.ksprintf
+let printf style fmt =
+  Printf.ksprintf
     (fun s ->
       let open Readline in
       let point = Point.get () in
@@ -160,7 +151,7 @@ let printf' f fmt =
       save_prompt ();
       ignore (replace_line "" 0);
       ignore (redisplay ());
-      print_string (f s);
+      print_string (Style.set_custom style ^ s ^ Style.unset_custom);
       Out_channel.flush stdout;
       restore_prompt ();
       ignore (replace_line text 0);
@@ -169,8 +160,14 @@ let printf' f fmt =
     fmt
 ;;
 
-let printf fmt = printf' Fn.id fmt
+let rprintf style fmt =
+  Printf.ksprintf
+    (fun s ->
+      print_string (Style.set_custom style ^ s ^ Style.unset_custom);
+      Out_channel.flush stdout)
+    fmt
+;;
 
-let tprintf style fmt =
-  printf' (fun s -> Style.set_custom style ^ s ^ Style.unset_custom) fmt
+let sprintf style fmt =
+  Printf.ksprintf (fun s -> Style.set_custom style ^ s ^ Style.unset_custom) fmt
 ;;

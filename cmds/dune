@@ -1,5 +1,5 @@
 (library
  (name cmds)
- (libraries core async textutils.console angstrom tdlib state cli)
+ (libraries core async angstrom tdlib state cli)
  (preprocess
-  (pps ppx_let ppx_fields_conv)))
+  (pps ppx_let ppx_fields_conv ppx_custom_printf)))
