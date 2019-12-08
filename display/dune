@@ -1,5 +1,5 @@
 (library
  (name display)
- (libraries core async textutils.console tdlib state)
+ (libraries core async uri tdlib state)
  (preprocess
   (pps ppx_let)))

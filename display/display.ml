@@ -12,23 +12,9 @@ end
 module Message = struct
   open Message
 
-  let display_content_of_photo photo_content =
-    let open Content.Photo in
-    let file = Option.value_exn (best_file photo_content) in
-    let local_file_path = file |> File.local |> File.Local.path in
-    let info =
-      [ caption photo_content; local_file_path ]
-      |> List.filter ~f:(Fun.negate String.is_empty)
-      |> String.concat ~sep:" -> "
-    in
-    if String.is_empty info
-    then sprintf "[Photo %ld]" (File.id file)
-    else sprintf "[Photo %ld] <%s>" (File.id file) info
-  ;;
+  let display_content_of_text text = Formatted_text.text (Content.Text.text text)
 
-  let display_content_of_animation animation_content =
-    let caption = animation_content |> Content.Animation.caption |> Formatted_text.text in
-    let file = animation_content |> Content.Animation.animation |> Animation.animation in
+  let display_content_of_file typ caption file =
     let local_file_path = file |> File.local |> File.Local.path in
     let info =
       [ caption; local_file_path ]
@@ -36,18 +22,79 @@ module Message = struct
       |> String.concat ~sep:" -> "
     in
     if String.is_empty info
-    then sprintf "[Animation %ld]" (File.id file)
-    else sprintf "[Animation %ld] <%s>" (File.id file) info
+    then sprintf "[%s %ld]" typ (File.id file)
+    else sprintf "[%s %ld] <%s>" typ (File.id file) info
+  ;;
+
+  let display_content_of_photo photo_content =
+    let photo = Content.Photo.photo photo_content in
+    if List.is_empty (Photo.sizes photo)
+    then "[Empty photo]"
+    else (
+      let file = Option.value_exn (Photo.best_file photo) in
+      display_content_of_file "Photo" (Content.Photo.caption photo_content) file)
+  ;;
+
+  let display_content_of_animation animation_content =
+    let caption = animation_content |> Content.Animation.caption |> Formatted_text.text in
+    let file = animation_content |> Content.Animation.animation |> Animation.animation in
+    display_content_of_file "Animation" caption file
+  ;;
+
+  let display_content_of_audio audio_content =
+    let caption = audio_content |> Content.Audio.caption in
+    let file = audio_content |> Content.Audio.audio |> Audio.audio in
+    display_content_of_file "Audio" caption file
+  ;;
+
+  let display_content_of_location location_content =
+    let location = Content.Location.location location_content in
+    let coordinates =
+      sprintf "%.6f,%.6f" (Location.latitude location) (Location.longitude location)
+    in
+    let uri = Uri.of_string "https://www.google.com/maps/search/?api=1" in
+    let uri = Uri.add_query_param' uri ("query", coordinates) in
+    sprintf "[Location %s] <%s>" coordinates (Uri.to_string uri)
+  ;;
+
+  let display_content_of_voice_note voice_note_content =
+    let caption = voice_note_content |> Content.Voice_note.caption in
+    let file = voice_note_content |> Content.Voice_note.voice_note |> Voice_note.voice in
+    display_content_of_file "Voice note" caption file
+  ;;
+
+  let display_content_of_change_photo content =
+    let photo = Content.Change_photo.photo content in
+    if List.is_empty (Photo.sizes photo)
+    then "[Photo changed to empty photo]"
+    else (
+      let file = Option.value_exn (Photo.best_file photo) in
+      display_content_of_file "Photo changed" "" file)
+  ;;
+
+  let display_content_of_change_title content =
+    let title = Content.Change_title.title content in
+    sprintf "[Title changed to %s]" title
+  ;;
+
+  let display_content_of_add_members content =
+    sprintf
+      "[%d new members added]"
+      (List.length (Content.Add_members.member_user_ids content))
   ;;
 
   let display_content content =
     let open Content in
     match content with
-    | Message_text text -> Formatted_text.text (Text.text text)
-    | Message_photo photo when not (List.is_empty photo.photo.sizes) ->
-      display_content_of_photo photo
-    | Message_photo _ -> "[Empty photo]"
-    | Message_animation animation -> display_content_of_animation animation
+    | Text text -> display_content_of_text text
+    | Photo photo -> display_content_of_photo photo
+    | Animation animation -> display_content_of_animation animation
+    | Audio audio -> display_content_of_audio audio
+    | Location location -> display_content_of_location location
+    | Change_photo photo -> display_content_of_change_photo photo
+    | Change_title title -> display_content_of_change_title title
+    | Add_members members -> display_content_of_add_members members
+    | Voice_note note -> display_content_of_voice_note note
     | Other _ -> "[Unsupported]"
   ;;
 end

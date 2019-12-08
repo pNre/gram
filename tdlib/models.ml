@@ -449,7 +449,9 @@ module Photo = struct
     { has_stickers : bool
     ; sizes : Size.t list
     }
-  [@@deriving yojson] [@@yojson.allow_extra_fields]
+  [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
+
+  let best_file { sizes; _ } = sizes |> List.last |> Option.map ~f:Size.photo
 end
 
 module Animation = struct
@@ -468,6 +470,37 @@ module Formatted_text = struct
   type t = { text : string } [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
 
   let create = Fields.create
+end
+
+module Audio = struct
+  type t =
+    { duration : int32
+    ; title : string
+    ; performer : string
+    ; file_name : string
+    ; mime_type : string
+    ; album_cover_thumbnail : Photo.Size.t option
+    ; audio : File.t
+    }
+  [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
+end
+
+module Location = struct
+  type t =
+    { latitude : float
+    ; longitude : float
+    }
+  [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
+end
+
+module Voice_note = struct
+  type t =
+    { duration : int32
+    ; waveform : string
+    ; mime_type : string
+    ; voice : File.t
+    }
+  [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
 end
 
 module Message = struct
@@ -493,17 +526,60 @@ module Message = struct
       [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
     end
 
+    module Photo_ = Photo
     module Photo = struct
       type t =
         { is_secret : bool
         ; caption : Formatted_text.t
         ; photo : Photo.t
         }
+      [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
+
+      let caption { caption; _ } = Formatted_text.text caption
+    end
+
+    module Audio = struct
+      type t =
+        { caption : Formatted_text.t
+        ; audio : Audio.t
+        }
       [@@deriving yojson] [@@yojson.allow_extra_fields]
 
-      let best_file { photo = { sizes; _ }; _ } =
-        sizes |> List.last |> Option.map ~f:Photo.Size.photo
-      ;;
+      let audio { audio; _ } = audio
+      let caption { caption; _ } = Formatted_text.text caption
+    end
+
+    module Location = struct
+      type t =
+        { location : Location.t
+        ; live_period : int32
+        ; expires_in : int32
+        }
+      [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
+    end
+
+    module Change_photo = struct
+      type t = { photo : Photo_.t }
+      [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
+    end
+
+    module Add_members = struct
+      type t = { member_user_ids : User.Id.t list }
+      [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
+    end
+
+    module Change_title = struct
+      type t = { title : string }
+      [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
+    end
+
+    module Voice_note = struct
+      type t =
+        { voice_note : Voice_note.t
+        ; caption : Formatted_text.t
+        ; is_listened : bool
+        }
+      [@@deriving yojson, fields] [@@yojson.allow_extra_fields]
 
       let caption { caption; _ } = Formatted_text.text caption
     end
@@ -596,28 +672,43 @@ module Message = struct
     end
 
     type t =
-      | Message_text of Text.t
-      | Message_photo of Photo.t
-      | Message_animation of Animation.t
+      | Audio of Audio.t
+      | Text of Text.t
+      | Photo of Photo.t
+      | Animation of Animation.t
+      | Location of Location.t
+      | Change_photo of Change_photo.t
+      | Change_title of Change_title.t
+      | Add_members of Add_members.t
+      | Voice_note of Voice_note.t
       | Other of Yojson.Safe.t
 
-    let yojson_of_t = function
-      | Message_text text ->
-        combine (Type_field.yojson_of_t "messageText") (Text.yojson_of_t text)
-      | Message_photo photo ->
-        combine (Type_field.yojson_of_t "messagePhoto") (Photo.yojson_of_t photo)
-      | Message_animation animation ->
-        combine
-          (Type_field.yojson_of_t "messageAnimation")
-          (Animation.yojson_of_t animation)
+    let yojson_of_t t =
+      let create name content = combine (Type_field.yojson_of_t name) content in
+      match t with
+      | Audio audio -> create "messageAudio" (Audio.yojson_of_t audio)
+      | Text text -> create "messageText" (Text.yojson_of_t text)
+      | Photo photo -> create "messagePhoto" (Photo.yojson_of_t photo)
+      | Animation animation -> create "messageAnimation" (Animation.yojson_of_t animation)
+      | Location location -> create "messageLocation" (Location.yojson_of_t location)
+      | Change_photo p -> create "messageChatChangePhoto" (Change_photo.yojson_of_t p)
+      | Change_title t -> create "messageChatChangeTitle" (Change_title.yojson_of_t t)
+      | Add_members m -> create "messageChatAddMembers" (Add_members.yojson_of_t m)
+      | Voice_note n -> create "messageVoiceNote" (Voice_note.yojson_of_t n)
       | Other j -> j
     ;;
 
     let t_of_yojson j =
       match Type_field.t_of_yojson j with
-      | "messageText" -> Message_text (Text.t_of_yojson j)
-      | "messagePhoto" -> Message_photo (Photo.t_of_yojson j)
-      | "messageAnimation" -> Message_animation (Animation.t_of_yojson j)
+      | "messageAudio" -> Audio (Audio.t_of_yojson j)
+      | "messageText" -> Text (Text.t_of_yojson j)
+      | "messagePhoto" -> Photo (Photo.t_of_yojson j)
+      | "messageAnimation" -> Animation (Animation.t_of_yojson j)
+      | "messageLocation" -> Location (Location.t_of_yojson j)
+      | "messageChatChangePhoto" -> Change_photo (Change_photo.t_of_yojson j)
+      | "messageChatChangeTitle" -> Change_title (Change_title.t_of_yojson j)
+      | "messageChatAddMembers" -> Add_members (Add_members.t_of_yojson j)
+      | "messageVoiceNote" -> Voice_note (Voice_note.t_of_yojson j)
       | _ -> Other j
     ;;
   end
@@ -799,117 +890,110 @@ module Request = struct
     ; typ : typ
     }
 
-  let create typ p = combine (Type_field.yojson_of_t typ) p
-  let create' typ prop p = create typ (`Assoc [ prop, p ])
+  let yojson_of_typ typ =
+    let create typ p = combine (Type_field.yojson_of_t typ) p in
+    let create' typ prop p = create typ (`Assoc [ prop, p ]) in
+    match typ with
+    | Set_log_verbosity_level new_verbosity_level ->
+      create'
+        "setLogVerbosityLevel"
+        "new_verbosity_level"
+        (Log.Verbosity_level.yojson_of_t new_verbosity_level)
+    | Set_tdlib_parameters parameters ->
+      create' "setTdlibParameters" "parameters" (Tdlib.Parameters.yojson_of_t parameters)
+    | Set_authentication_phone_number phone_number ->
+      create' "setAuthenticationPhoneNumber" "phone_number" (`String phone_number)
+    | Check_database_encryption_key key ->
+      create' "checkDatabaseEncryptionKey" "key" (`String key)
+    | Check_authentication_code code ->
+      create' "checkAuthenticationCode" "code" (`String code)
+    | Get_contacts -> Type_field.yojson_of_t "getContacts"
+    | Get_chat chat_id -> create' "getChat" "chat_id" (Chat.Id.yojson_of_t chat_id)
+    | Get_chats request -> create "getChats" (Chat.Request.Get_chats.yojson_of_t request)
+    | Get_message request -> create "getMessage" (Message.Request.Get.yojson_of_t request)
+    | Chats ids ->
+      create' "chats" "chat_ids" (`List (List.map ids ~f:Chat.Id.yojson_of_t))
+    | Chat chat -> create "chat" (Chat.yojson_of_t chat)
+    | Message message -> create "message" (Message.yojson_of_t message)
+    | Send_message request ->
+      create "sendMessage" (Message.Request.Send.yojson_of_t request)
+    | View_messages request ->
+      create "viewMessages" (Message.Request.View.yojson_of_t request)
+    | Cancel_download_file file_id ->
+      create' "cancelDownloadFile" "file_id" (yojson_of_int32 file_id)
+    | Download_file request ->
+      create "downloadFile" (File.Request.Download.yojson_of_t request)
+    | Update_authorization_state state ->
+      create'
+        "updateAuthorizationState"
+        "authorization_state"
+        (Authorization_state.yojson_of_t state)
+    | Update_new_message message ->
+      create' "updateNewMessage" "message" (Message.yojson_of_t message)
+    | Update_message_content request ->
+      create "updateMessageContent" (Message.Request.Update_content.yojson_of_t request)
+    | Update_new_chat chat -> create' "updateNewChat" "chat" (Chat.yojson_of_t chat)
+    | Update_chat_read_inbox read_inbox ->
+      create "updateChatReadInbox" (Chat.Read_inbox.yojson_of_t read_inbox)
+    | Update_user user -> create' "updateUser" "user" (User.yojson_of_t user)
+    | Update_user_status status ->
+      create "updateUserStatus" (User.Request.Update_status.yojson_of_t status)
+    | Update_user_chat_action action ->
+      create "updateUserChatAction" (Chat.Request.Update_action.yojson_of_t action)
+    | Update_file file -> create' "updateFile" "file" (File.yojson_of_t file)
+    | Ok -> Type_field.yojson_of_t "ok"
+    | Other j -> j
+  ;;
 
   let yojson_of_t { uuid; typ } =
-    let base =
-      match typ with
-      | Set_log_verbosity_level new_verbosity_level ->
-        create'
-          "setLogVerbosityLevel"
-          "new_verbosity_level"
-          (Log.Verbosity_level.yojson_of_t new_verbosity_level)
-      | Set_tdlib_parameters parameters ->
-        create'
-          "setTdlibParameters"
-          "parameters"
-          (Tdlib.Parameters.yojson_of_t parameters)
-      | Set_authentication_phone_number phone_number ->
-        create' "setAuthenticationPhoneNumber" "phone_number" (`String phone_number)
-      | Check_database_encryption_key key ->
-        create' "checkDatabaseEncryptionKey" "key" (`String key)
-      | Check_authentication_code code ->
-        create' "checkAuthenticationCode" "code" (`String code)
-      | Get_contacts -> Type_field.yojson_of_t "getContacts"
-      | Get_chat chat_id -> create' "getChat" "chat_id" (Chat.Id.yojson_of_t chat_id)
-      | Get_chats request ->
-        create "getChats" (Chat.Request.Get_chats.yojson_of_t request)
-      | Get_message request ->
-        create "getMessage" (Message.Request.Get.yojson_of_t request)
-      | Chats ids ->
-        create' "chats" "chat_ids" (`List (List.map ids ~f:Chat.Id.yojson_of_t))
-      | Chat chat -> create "chat" (Chat.yojson_of_t chat)
-      | Message message -> create "message" (Message.yojson_of_t message)
-      | Send_message request ->
-        create "sendMessage" (Message.Request.Send.yojson_of_t request)
-      | View_messages request ->
-        create "viewMessages" (Message.Request.View.yojson_of_t request)
-      | Cancel_download_file file_id ->
-        create' "cancelDownloadFile" "file_id" (yojson_of_int32 file_id)
-      | Download_file request ->
-        create "downloadFile" (File.Request.Download.yojson_of_t request)
-      | Update_authorization_state state ->
-        create'
-          "updateAuthorizationState"
-          "authorization_state"
-          (Authorization_state.yojson_of_t state)
-      | Update_new_message message ->
-        create' "updateNewMessage" "message" (Message.yojson_of_t message)
-      | Update_message_content request ->
-        create "updateMessageContent" (Message.Request.Update_content.yojson_of_t request)
-      | Update_new_chat chat -> create' "updateNewChat" "chat" (Chat.yojson_of_t chat)
-      | Update_chat_read_inbox read_inbox ->
-        create "updateChatReadInbox" (Chat.Read_inbox.yojson_of_t read_inbox)
-      | Update_user user -> create' "updateUser" "user" (User.yojson_of_t user)
-      | Update_user_status status ->
-        create "updateUserStatus" (User.Request.Update_status.yojson_of_t status)
-      | Update_user_chat_action action ->
-        create "updateUserChatAction" (Chat.Request.Update_action.yojson_of_t action)
-      | Update_file file -> create' "updateFile" "file" (File.yojson_of_t file)
-      | Ok -> Type_field.yojson_of_t "ok"
-      | Other j -> j
-    in
     match uuid with
-    | Some uuid -> combine (`Assoc [ "@extra", `String uuid ]) base
-    | None -> base
+    | Some uuid -> combine (`Assoc [ "@extra", `String uuid ]) (yojson_of_typ typ)
+    | None -> yojson_of_typ typ
+  ;;
+
+  let typ_of_yojson j =
+    match Type_field.t_of_yojson j with
+    | "setLogVerbosityLevel" ->
+      Set_log_verbosity_level
+        (Log.Verbosity_level.t_of_yojson (member "new_verbosity_level" j))
+    | "setTdlibParameters" ->
+      Set_tdlib_parameters (Tdlib.Parameters.t_of_yojson (member "parameters" j))
+    | "setAuthenticationPhoneNumber" ->
+      Set_authentication_phone_number (to_string (member "phone_number" j))
+    | "checkDatabaseEncryptionKey" ->
+      Check_database_encryption_key (to_string (member "key" j))
+    | "checkAuthenticationCode" -> Check_authentication_code (to_string (member "code" j))
+    | "getContacts" -> Get_contacts
+    | "getChat" -> Get_chat (Chat.Id.t_of_yojson (member "chat_id" j))
+    | "getChats" -> Get_chats (Chat.Request.Get_chats.t_of_yojson j)
+    | "getMessage" -> Get_message (Message.Request.Get.t_of_yojson j)
+    | "chats" -> Chats (list_of_yojson Chat.Id.t_of_yojson (member "chat_ids" j))
+    | "chat" -> Chat (Chat.t_of_yojson j)
+    | "message" -> Message (Message.t_of_yojson j)
+    | "sendMessage" -> Send_message (Message.Request.Send.t_of_yojson j)
+    | "viewMessages" -> View_messages (Message.Request.View.t_of_yojson j)
+    | "cancelDownloadFile" -> Cancel_download_file (int32_of_yojson (member "file_id" j))
+    | "downloadFile" -> Download_file (File.Request.Download.t_of_yojson j)
+    | "updateAuthorizationState" ->
+      Update_authorization_state
+        (Authorization_state.t_of_yojson (member "authorization_state" j))
+    | "updateNewMessage" -> Update_new_message (Message.t_of_yojson (member "message" j))
+    | "updateMessageContent" ->
+      Update_message_content (Message.Request.Update_content.t_of_yojson j)
+    | "updateNewChat" -> Update_new_chat (Chat.t_of_yojson (member "chat" j))
+    | "updateChatReadInbox" -> Update_chat_read_inbox (Chat.Read_inbox.t_of_yojson j)
+    | "updateUser" -> Update_user (User.t_of_yojson (member "user" j))
+    | "updateUserStatus" -> Update_user_status (User.Request.Update_status.t_of_yojson j)
+    | "updateUserChatAction" ->
+      Update_user_chat_action (Chat.Request.Update_action.t_of_yojson j)
+    | "updateFile" -> Update_file (File.t_of_yojson (member "file" j))
+    | "ok" -> Ok
+    | _ -> Other j
   ;;
 
   let t_of_yojson j =
     let uuid = j |> member "@extra" |> to_string_option in
-    let typ =
-      match Type_field.t_of_yojson j with
-      | "setLogVerbosityLevel" ->
-        Set_log_verbosity_level
-          (Log.Verbosity_level.t_of_yojson (member "new_verbosity_level" j))
-      | "setTdlibParameters" ->
-        Set_tdlib_parameters (Tdlib.Parameters.t_of_yojson (member "parameters" j))
-      | "setAuthenticationPhoneNumber" ->
-        Set_authentication_phone_number (to_string (member "phone_number" j))
-      | "checkDatabaseEncryptionKey" ->
-        Check_database_encryption_key (to_string (member "key" j))
-      | "checkAuthenticationCode" ->
-        Check_authentication_code (to_string (member "code" j))
-      | "getContacts" -> Get_contacts
-      | "getChat" -> Get_chat (Chat.Id.t_of_yojson (member "chat_id" j))
-      | "getChats" -> Get_chats (Chat.Request.Get_chats.t_of_yojson j)
-      | "getMessage" -> Get_message (Message.Request.Get.t_of_yojson j)
-      | "chats" -> Chats (list_of_yojson Chat.Id.t_of_yojson (member "chat_ids" j))
-      | "chat" -> Chat (Chat.t_of_yojson j)
-      | "message" -> Message (Message.t_of_yojson j)
-      | "sendMessage" -> Send_message (Message.Request.Send.t_of_yojson j)
-      | "viewMessages" -> View_messages (Message.Request.View.t_of_yojson j)
-      | "cancelDownloadFile" ->
-        Cancel_download_file (int32_of_yojson (member "file_id" j))
-      | "downloadFile" -> Download_file (File.Request.Download.t_of_yojson j)
-      | "updateAuthorizationState" ->
-        Update_authorization_state
-          (Authorization_state.t_of_yojson (member "authorization_state" j))
-      | "updateNewMessage" ->
-        Update_new_message (Message.t_of_yojson (member "message" j))
-      | "updateMessageContent" ->
-        Update_message_content (Message.Request.Update_content.t_of_yojson j)
-      | "updateNewChat" -> Update_new_chat (Chat.t_of_yojson (member "chat" j))
-      | "updateChatReadInbox" -> Update_chat_read_inbox (Chat.Read_inbox.t_of_yojson j)
-      | "updateUser" -> Update_user (User.t_of_yojson (member "user" j))
-      | "updateUserStatus" ->
-        Update_user_status (User.Request.Update_status.t_of_yojson j)
-      | "updateUserChatAction" ->
-        Update_user_chat_action (Chat.Request.Update_action.t_of_yojson j)
-      | "updateFile" -> Update_file (File.t_of_yojson (member "file" j))
-      | "ok" -> Ok
-      | _ -> Other j
-    in
+    let typ = typ_of_yojson j in
     { uuid; typ }
   ;;
 end
