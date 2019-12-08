@@ -527,6 +527,7 @@ module Message = struct
     end
 
     module Photo_ = Photo
+
     module Photo = struct
       type t =
         { is_secret : bool
@@ -952,41 +953,40 @@ module Request = struct
   ;;
 
   let typ_of_yojson j =
+    let map f name = f (member name j) in
     match Type_field.t_of_yojson j with
     | "setLogVerbosityLevel" ->
-      Set_log_verbosity_level
-        (Log.Verbosity_level.t_of_yojson (member "new_verbosity_level" j))
+      Set_log_verbosity_level (map Log.Verbosity_level.t_of_yojson "new_verbosity_level")
     | "setTdlibParameters" ->
-      Set_tdlib_parameters (Tdlib.Parameters.t_of_yojson (member "parameters" j))
+      Set_tdlib_parameters (map Tdlib.Parameters.t_of_yojson "parameters")
     | "setAuthenticationPhoneNumber" ->
-      Set_authentication_phone_number (to_string (member "phone_number" j))
-    | "checkDatabaseEncryptionKey" ->
-      Check_database_encryption_key (to_string (member "key" j))
+      Set_authentication_phone_number (map to_string "phone_number")
+    | "checkDatabaseEncryptionKey" -> Check_database_encryption_key (map to_string "key")
     | "checkAuthenticationCode" -> Check_authentication_code (to_string (member "code" j))
     | "getContacts" -> Get_contacts
-    | "getChat" -> Get_chat (Chat.Id.t_of_yojson (member "chat_id" j))
+    | "getChat" -> Get_chat (map Chat.Id.t_of_yojson "chat_id")
     | "getChats" -> Get_chats (Chat.Request.Get_chats.t_of_yojson j)
     | "getMessage" -> Get_message (Message.Request.Get.t_of_yojson j)
-    | "chats" -> Chats (list_of_yojson Chat.Id.t_of_yojson (member "chat_ids" j))
+    | "chats" -> Chats (map (list_of_yojson Chat.Id.t_of_yojson) "chat_ids")
     | "chat" -> Chat (Chat.t_of_yojson j)
     | "message" -> Message (Message.t_of_yojson j)
     | "sendMessage" -> Send_message (Message.Request.Send.t_of_yojson j)
     | "viewMessages" -> View_messages (Message.Request.View.t_of_yojson j)
-    | "cancelDownloadFile" -> Cancel_download_file (int32_of_yojson (member "file_id" j))
+    | "cancelDownloadFile" -> Cancel_download_file (map int32_of_yojson "file_id")
     | "downloadFile" -> Download_file (File.Request.Download.t_of_yojson j)
     | "updateAuthorizationState" ->
       Update_authorization_state
-        (Authorization_state.t_of_yojson (member "authorization_state" j))
-    | "updateNewMessage" -> Update_new_message (Message.t_of_yojson (member "message" j))
+        (map Authorization_state.t_of_yojson "authorization_state")
+    | "updateNewMessage" -> Update_new_message (map Message.t_of_yojson "message")
     | "updateMessageContent" ->
       Update_message_content (Message.Request.Update_content.t_of_yojson j)
-    | "updateNewChat" -> Update_new_chat (Chat.t_of_yojson (member "chat" j))
+    | "updateNewChat" -> Update_new_chat (map Chat.t_of_yojson "chat")
     | "updateChatReadInbox" -> Update_chat_read_inbox (Chat.Read_inbox.t_of_yojson j)
-    | "updateUser" -> Update_user (User.t_of_yojson (member "user" j))
+    | "updateUser" -> Update_user (map User.t_of_yojson "user")
     | "updateUserStatus" -> Update_user_status (User.Request.Update_status.t_of_yojson j)
     | "updateUserChatAction" ->
       Update_user_chat_action (Chat.Request.Update_action.t_of_yojson j)
-    | "updateFile" -> Update_file (File.t_of_yojson (member "file" j))
+    | "updateFile" -> Update_file (map File.t_of_yojson "file")
     | "ok" -> Ok
     | _ -> Other j
   ;;
