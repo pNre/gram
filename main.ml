@@ -140,8 +140,8 @@ let dispatch dbpath state client = function
 ;;
 
 let debug_log = function
-  | `Sent -> printf Style.tertiary "→ %s\n"
-  | `Received -> printf Style.tertiary "← %s\n"
+  | `Sent data -> printf Style.tertiary "→ %s\n" data
+  | `Received data -> printf Style.tertiary "← %s\n" data
 ;;
 
 let cli client state () =
@@ -165,7 +165,7 @@ let receive dbpath client state () =
 
 let start dbpath debug =
   ignore (Client.execute (Models.Request.Set_log_verbosity_level Error));
-  let debug = if debug then debug_log else fun _ _ -> () in
+  let debug = if debug then debug_log else ignore in
   let client = Client.init ~debug () in
   let state = State.create () in
   Cli.configure state;

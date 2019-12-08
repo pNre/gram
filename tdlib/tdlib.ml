@@ -10,10 +10,10 @@ module Client = struct
   type t =
     { client : Tdjson.client
     ; timeout : float
-    ; debug : [ `Sent | `Received ] -> string -> unit
+    ; debug : [ `Sent of string | `Received of string ] -> unit
     }
 
-  let init ?(debug = fun _ _ -> ()) () =
+  let init ?(debug = ignore) () =
     { client = td_json_client_create (); timeout = 10.; debug }
   ;;
 
@@ -37,7 +37,7 @@ module Client = struct
     let uuid = Uuid.to_string (Uuid_unix.create ()) in
     let json = yojson_of_t { uuid = Some uuid; typ } in
     let serialized = Yojson.Safe.to_string json in
-    debug `Sent serialized;
+    debug (`Sent serialized);
     td_json_client_send client serialized;
     uuid
   ;;
@@ -47,7 +47,7 @@ module Client = struct
   let receive { client; timeout; debug; _ } =
     Async.In_thread.run (fun _ ->
         let data = td_json_client_receive timeout client in
-        Option.iter data ~f:(debug `Received);
+        Option.iter data ~f:(fun data -> debug (`Received data));
         Option.map data ~f:request_of_string)
   ;;
 end
