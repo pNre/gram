@@ -35,7 +35,14 @@ let handle_message state ?(prefix = "") message =
     | None, Some user -> User.full_name user
     | None, None -> User.Id.to_string sender_user_id
   in
-  printf [] "%s%s%s\n" prefix (Style.with_format sender_style title ^ ": ") content
+  let id = "(" ^ Message.Id.to_string (Message.id message) ^ ")" in
+  printf
+    []
+    "%s %s%s%s\n"
+    (Style.with_format Style.secondary id)
+    prefix
+    (Style.with_format sender_style title ^ ": ")
+    content
 ;;
 
 let handle_user_status state update =

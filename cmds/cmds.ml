@@ -76,20 +76,43 @@ module Command = struct
   ;;
 end
 
+(*Generic message sending*)
+let send_message client state recipient reply_to_message_id message =
+  recipient
+  |> State.find_chat state
+  |> Option.iter ~f:(fun chat ->
+         let open Models in
+         let open Message.Content in
+         let chat_id = Chat.id chat in
+         let input_message_content = Input.create_text message in
+         let req =
+           Message.Request.Send.create ~reply_to_message_id chat_id input_message_content
+         in
+         Client.send client (Send_message req));
+  state
+;;
+
 (*Sends a message*)
-let message client state args =
-  let send_message recipient message =
-    let chat = State.find_chat state recipient in
-    Option.iter chat ~f:(fun chat ->
-        let open Models.Message.Content in
-        let chat_id = Models.Chat.id chat in
-        let input_message_content = Input.create_text message in
-        let req = Models.Message.Request.Send.create chat_id input_message_content in
-        Client.send client (Send_message req));
-    state
-  in
+let message client state = function
+  | recipient :: args ->
+    send_message client state recipient 0L (String.concat ~sep:" " args)
+  | _ -> state
+;;
+
+(*Sends a reply*)
+let reply client state args =
+  let message_id_of_string s = Option.try_with (fun _ -> Message.Id.of_string s) in
   match args with
-  | recipient :: args -> send_message recipient (String.concat ~sep:" " args)
+  | recipient :: message_id :: args ->
+    (match message_id_of_string message_id with
+    | Some reply_to_message_id ->
+      send_message
+        client
+        state
+        recipient
+        reply_to_message_id
+        (String.concat ~sep:" " args)
+    | None -> state)
   | _ -> state
 ;;
 
@@ -171,6 +194,15 @@ let commands =
       ~summary:"Send a message"
       ~handler:message
   ; create
+      ~name:"mr"
+      ~shape:
+        [ arg ~name:"recipient" ~summary:"Name of the recipient or chat"
+        ; arg ~name:"message-id" ~summary:"Id of the message to reply to"
+        ; anon ~name:"message"
+        ]
+      ~summary:"Send a reply"
+      ~handler:reply
+  ; create
       ~name:"p"
       ~shape:
         [ arg ~name:"recipient" ~summary:"Name of the recipient or chat"
@@ -215,7 +247,7 @@ let exec client state cmd =
   match Parser.parse cmd with
   | Ok (command :: args) when String.Table.mem commands command ->
     let command = String.Table.find_exn commands command in
-    (command.handler client state args)
+    command.handler client state args
   | Ok [] -> state
   | Ok (command :: _) ->
     fallback command;
