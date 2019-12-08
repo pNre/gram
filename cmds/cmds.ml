@@ -125,7 +125,7 @@ let read client state args =
     State.add_mutation state (fun req state ->
         match req with
         | { uuid = Some uuid; typ = Ok } when uuid = request_uuid ->
-          rprintf Style.tertiary !"%{Chat.title} marked as read\n" chat;
+          printf Style.tertiary !"%{Chat.title} marked as read\n" chat;
           `Apply (State.remove_unread_message_ids state chat_id)
         | _ -> `Skip)
   | None -> state
