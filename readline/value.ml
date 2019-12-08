@@ -40,3 +40,4 @@ module RW_string (S : Named) = struct
     Wrapped.set (Option.map Types.char_ptr_of_string s)
   ;;
 end
+

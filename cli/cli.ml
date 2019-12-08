@@ -5,7 +5,6 @@ open Tdlib.Models
 module Completion = struct
   open Readline
 
-  let state : State.t Mvar.Read_write.t option ref = ref None
   let index : int ref = ref 0
 
   let prepare_completion s =
@@ -17,8 +16,8 @@ module Completion = struct
     Completion_entry_function.completion_result_of_string result
   ;;
 
-  let completion_entry text completion_state =
-    let state = Mvar.peek_exn (Option.value_exn !state) in
+  let completion_entry state text completion_state =
+    let state = Mvar.peek_exn state in
     let users = State.lookup_users state text in
     let chats = State.lookup_chats state text in
     let results = List.map users ~f:User.full_name @ List.map chats ~f:Chat.title in
@@ -33,8 +32,8 @@ module Completion = struct
         (filename_completion_function text completion_state)
   ;;
 
-  let attempted_completion text start _end =
-    if start = 0 then Some (completion_matches text completion_entry) else None
+  let attempted_completion state text start _end =
+    if start = 0 then Some (completion_matches text (completion_entry state)) else None
   ;;
 
   let rec is_char_quoted text index =
@@ -44,10 +43,9 @@ module Completion = struct
   ;;
 end
 
-let configure state' =
-  Completion.state := Some state';
-  Readline.Attempted_completion_function.set Completion.attempted_completion;
-  Readline.Completion_entry_function.set Completion.completion_entry;
+let configure state =
+  Readline.Attempted_completion_function.set (Some (Completion.attempted_completion state));
+  Readline.Completion_entry_function.set (Some (Completion.completion_entry state));
   Readline.Char_is_quoted.set Completion.is_char_quoted;
   Readline.Completer_quote_characters.set (Some "\"");
   Readline.Completer_word_break_characters.set (Some " \t");

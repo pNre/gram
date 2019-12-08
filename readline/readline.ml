@@ -63,38 +63,39 @@ module Completion_entry_function = struct
 
   let completion_result : completion_result typ = ptr char
   let completion_result_opt : completion_result option typ = ptr_opt char
-
-  include Value.RW (struct
-    type t = string -> int -> completion_result option
-
-    let typ =
-      funptr ~runtime_lock:true (string @-> int @-> returning completion_result_opt)
-    ;;
-
-    let name = "rl_completion_entry_function"
-  end)
-
   let completion_result_of_string s : completion_result = Types.char_ptr_of_string s
   let completion_result_of_char_ptr (p : char ptr) : completion_result = p
+
+  include (val dynamic_funptr
+                 ~runtime_lock:true
+                 (string @-> int @-> returning completion_result_opt))
+
+  let value = Foreign.foreign_value "rl_completion_entry_function" t_opt
+
+  let set v =
+    Option.iter free !@value;
+    value <-@ Option.map of_fun v
+  ;;
 end
 
-module Attempted_completion_function = Value.RW (struct
+module Attempted_completion_function = struct
   type attempted_completion_result = char ptr ptr
 
   let attempted_completion_result_opt : attempted_completion_result option typ =
     ptr_opt (ptr char)
   ;;
 
-  type t = string -> int -> int -> attempted_completion_result option
+  include (val dynamic_funptr
+                 ~runtime_lock:true
+                 (string @-> int @-> int @-> returning attempted_completion_result_opt))
 
-  let name = "rl_attempted_completion_function"
+  let value = Foreign.foreign_value "rl_attempted_completion_function" t_opt
 
-  let typ =
-    funptr
-      ~runtime_lock:true
-      (string @-> int @-> int @-> returning attempted_completion_result_opt)
+  let set v =
+    Option.iter free !@value;
+    value <-@ Option.map of_fun v
   ;;
-end)
+end
 
 module Attempted_completion_over = Value.RW (struct
   type t = bool
@@ -152,6 +153,7 @@ let completion_matches =
 
 (*Misc*)
 let () =
+  Foreign.report_leaked_funptr := ignore;
   foreign_value "rl_readline_name" string <-@ "tgcaml";
   foreign_value "rl_catch_signals" int <-@ 0;
   foreign_value "rl_complete_with_tilde_expansion" int <-@ 1
